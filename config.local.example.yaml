@@ -1,0 +1,7 @@
+# Copy to config.local.yaml (git-ignored) to override config.yaml on THIS machine.
+# Anything you set here replaces the same setting in config.yaml. Lists are
+# replaced as a whole. Do not put passwords or keys here.
+branding:
+  app_name: My Tool Name
+  theme:
+    accent: "#1F7A3D"

@@ -1,0 +1,2 @@
+# Keep plain (LF) line endings everywhere: the inline Lambda code and its tests depend on exact bytes.
+* text=auto eol=lf

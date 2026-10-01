@@ -1,18 +1,21 @@
-# Build and Release Folders
-bin-debug/
-bin-release/
-[Oo]bj/
-[Bb]in/
+# ---- Credentials and local state: NEVER commit ----
+creds/
+secrets.local.yaml
+*.local.yaml
+.env
+.env.*
+*.pem
+*.key
+*.p12
+.aws/
+data/
+deploy/params.local.json
+.vscode/settings.json
 
-# Other files and folders
-.settings/
-
-# Executables
-*.swf
-*.air
-*.ipa
-*.apk
-
-# Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
-# should NOT be excluded as they contain compiler settings and other important
-# information for Eclipse / Flash Builder.
+# ---- Python / tooling ----
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.pre-commit-local.yaml
+*.log

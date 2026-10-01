@@ -1,0 +1,203 @@
+# ============================================================================
+# config.yaml  -  NON-SECRET settings. Safe to commit. Every option is
+# documented here AND in docs/CONFIGURATION.md.
+#
+# Credentials do NOT go in this file. They live in:
+#   secrets.local.yaml   API keys / AWS keys (git-ignored, local only)
+#   creds/               service-switch password record (git-ignored, local only)
+#
+# Machine-specific or private values (display name, colours, e-mail) go in
+# config.local.yaml, which is merged on top of this file and is git-ignored.
+# See config.local.example.yaml.
+#
+# "COST:" comments mark choices made explicitly to keep the bill low.
+# ============================================================================
+
+# Neutral name used to derive all resource names (containers, S3 buckets,
+# AWS tags). Lowercase letters, digits and hyphens only.
+project_name: kb-verifier
+
+# ----------------------------------------------------------------------------
+# branding: what people see in the browser. Override in config.local.yaml.
+# Colours must be #RRGGBB.
+# ----------------------------------------------------------------------------
+branding:
+  app_name: Knowledge Verifier   # Shown in the page header and browser tab.
+  theme:
+    accent: "#1F7A3D"            # Green. Buttons, links, active states. Placeholder shade: replace with your logo's exact green.
+    accent_text: "#F9F6EE"       # Text drawn on top of the accent colour.
+    background: "#EFEADC"        # Page background (a slightly deeper bone).
+    surface: "#F9F6EE"           # Panels, chat bubbles, header: bone white.
+    text: "#000000"              # Main text: darkest black.
+    muted: "#4A4A40"             # Secondary text.
+    line: "#CFC8B4"              # Borders and dividers.
+    highlight: "#F2DE7A"         # Highlight behind the matching text in a source.
+
+# ----------------------------------------------------------------------------
+# server
+# ----------------------------------------------------------------------------
+server:
+  serve_ui: true                 # true: this server also serves the web page (local runs). false when the page is hosted separately (S3 + CloudFront).
+
+# ----------------------------------------------------------------------------
+# credentials: where password hashes (service switch, user accounts) and the
+# sign-in cookie key are kept. Only salted hashes are stored, never passwords.
+# ----------------------------------------------------------------------------
+credentials:
+  backend: file                  # file = local folder (local runs). s3 = private S3 bucket (AWS: the compose file sets this for you). secrets_manager = planned, not built.
+  path: creds                    # Folder for backend=file. Git-ignored and docker-ignored. Created with owner-only permissions.
+  s3_bucket: ""                  # Backend s3 only. Leave empty on AWS: the server is given the bucket name through its environment.
+  s3_prefix: ""                  # Backend s3 only. Optional folder inside the bucket, e.g. "creds/".
+
+# ----------------------------------------------------------------------------
+# service_switch: the password-protected on/off gate. While OFF, every API
+# except health, status and the switch itself answers "Service offline".
+# On AWS the switch is a small control function that really STARTS and STOPS the
+# server (so "off" stops the compute charge); the deployment sets mode: aws.
+# ----------------------------------------------------------------------------
+service_switch:
+  mode: local                    # local = this app has its own on/off gate (local runs). aws = the AWS control function is the only switch and the server has none (the AWS compose file sets this; don't edit it).
+  auto_off_hours: 0              # COST: local mode only. Turn the service off automatically after this many hours. 0 = never. On AWS use deployment.schedule instead.
+  max_failed_attempts: 5         # Wrong passwords before a temporary lockout.
+  lockout_minutes: 10            # Lockout length. The lockout is global, so it also stops password guessing from many addresses.
+  state_path: data/service_state.json   # Where on/off is remembered across restarts. Missing or unreadable = OFF.
+
+# ----------------------------------------------------------------------------
+# costs: inputs for the cost calculator (see docs/SERVICE_SWITCH_AND_COSTS.md).
+# Prices change. Check them against the AWS and model-provider price pages.
+# ----------------------------------------------------------------------------
+costs:
+  heartbeat_seconds: 300         # How often the running server records "I'm up". Used to measure compute hours. 0 = don't record.
+  max_range_days: 366            # Longest period the calculator accepts.
+  rates:
+    instance_hourly_usd: 0.0168  # On-demand price per hour of the chosen instance type (t4g.small, us-east-1 at last check).
+    elastic_ip_hourly_usd: 0.005 # Public IPv4 address, billed every hour it exists.
+    ebs_gb_month_usd: 0.08       # Disk, per GB-month (gp3).
+    s3_gb_month_usd: 0.023       # Document storage, per GB-month (S3 Standard).
+  llm_prices_per_mtok:           # [input, output] US dollars per million tokens, per model name used in llm.model_*.
+    claude-haiku-4-5-20251001: [1.0, 5.0]
+    claude-sonnet-5-5: [3.0, 15.0]   # Check this one against the current price list.
+    qwen3:4b: [0, 0]                  # Local model (llm.provider: local): runs on your own hardware.
+
+# ----------------------------------------------------------------------------
+# containers: which tool runs the local stack and builds the image (set it per machine in config.local.yaml)
+# ----------------------------------------------------------------------------
+containers:
+  engine: docker-desktop         # docker-desktop | rancher-desktop. Run everything through: python scripts/containers.py ...
+  rancher_runtime: moby          # rancher-desktop only: moby (dockerd: the usual docker commands) | containerd (nerdctl)
+  gpu: auto                      # auto | on | off. auto = NVIDIA GPU on Docker Desktop when nvidia-smi exists; CPU on Rancher Desktop
+
+# ----------------------------------------------------------------------------
+# deployment: used by deploy/ scripts only (not by the running app)
+# ----------------------------------------------------------------------------
+deployment:
+  region: us-east-1              # AWS region. COST: prices differ by region; check data-residency rules before choosing.
+  instance_type: t4g.small       # COST: smallest ARM instance with 2 GiB memory. t4g.medium (4 GiB) if memory runs short.
+  use_spot: false                # Not wired into the CloudFormation template yet (spot would add interruptions to a stateful box).
+  root_volume_gb: 20             # Disk size in GB. Holds the database and model cache.
+  allowed_ingress_cidrs:         # Only for running the instance directly exposed. The default AWS template does NOT use this: only CloudFront can reach the server. IP allow-listing at the edge needs AWS WAF (extra cost).
+    - "0.0.0.0/0"
+  domain: ""                     # Reserved for a custom domain (not used by the default template).
+  schedule:
+    enabled: false               # COST: true stops the instance outside working hours (roughly halves compute cost).
+    timezone: "UTC"              # IANA timezone name, e.g. "America/New_York".
+    start_hour: 8                # Weekday start hour (0-23).
+    stop_hour: 18                # Weekday stop hour (0-23).
+  budget_limit_usd: 40           # Monthly AWS Budget alert threshold. Alert only; it does not stop anything. Set the e-mail in a local params file.
+
+# ----------------------------------------------------------------------------
+# clearance: ordered access levels, LOWEST first. A user can read a document
+# when their level is the same or higher than the document's level
+# (superset rule). These are also the user roles.
+# ----------------------------------------------------------------------------
+clearance:
+  levels: [employee, super]
+  default_upload_level: highest  # Level every NEW upload starts at. Uploaders never choose it: anyone can add, not everyone can read. "highest" = top level until a reviewer relabels it (fails safe). Or name a level.
+
+# ----------------------------------------------------------------------------
+# ingestion: how documents are accepted and split
+# ----------------------------------------------------------------------------
+ingestion:
+  allowed_extensions: [pdf, docx, txt, md, csv, xlsx, pptx, html, eml]   # Only types that have a reader. Old .doc/.xls/.ppt/.rtf must be saved as the newer format first.
+  max_file_mb: 25
+  max_documents: 100             # Total documents allowed. Protects disk and cost, because /add is open to anyone. Uploads past this are refused.
+  chunk_size_chars: 1200
+  chunk_overlap_chars: 150
+  ocr_enabled: false             # COST: OCR for scans uses extra CPU and memory. Turn on only if you have scans.
+
+# ----------------------------------------------------------------------------
+# embeddings: turns text into vectors for search
+# ----------------------------------------------------------------------------
+embeddings:
+  provider: local                # local = fastembed model on this machine (COST: no per-call fee; downloads ~130 MB on first use). hashing = word-matching stand-in for tests and offline demos only.
+  model: BAAI/bge-small-en-v1.5
+  dimensions: 384                # MUST match the model. Changing it requires re-ingesting all documents.
+
+# ----------------------------------------------------------------------------
+# llm: the model that extracts facts and writes answers
+# ----------------------------------------------------------------------------
+llm:
+  provider: anthropic            # anthropic | bedrock | local. local = an open model run by the ollama service on this machine: no key, no per-question fee (see docs/LOCAL_MODEL.md; not for the small AWS server). Bedrock uses the server's AWS role, so NO API key ever has to leave your machine. Model names differ on Bedrock; check availability and pricing.
+  model_extract: claude-haiku-4-5-20251001   # Reserved for fact extraction (not used yet).
+  model_answer: claude-sonnet-5-5
+  local_url: http://ollama:11434 # Used only when provider is local.
+  max_output_tokens: 400         # COST and SPEED: hard cap on answer length (the model writes ~60 tokens/s on a laptop GPU). Too low cuts the reply off mid-JSON.
+  max_context_chunks: 8          # COST: chunks sent to the model per question.
+  daily_token_cap: 500000        # COST: tokens per day across all users. 0 = no cap.
+  cache_answers: true            # SPEED and COST: reuse the reply to an identical question over identical passages (kept in memory, cleared on restart). Never crosses access levels.
+
+# ----------------------------------------------------------------------------
+# retrieval: search behaviour
+# ----------------------------------------------------------------------------
+retrieval:
+  top_k: 20
+  min_score: 0.25
+
+# ----------------------------------------------------------------------------
+# speech: microphone input
+# ----------------------------------------------------------------------------
+speech:
+  mode: browser                  # browser | local | off. COST: browser is free but some browsers send audio to their vendor. Use local or off for sensitive use.
+
+# ----------------------------------------------------------------------------
+# ui: the pages. Each has its own address: /ask (role-checked) and /add (no role
+# check: anyone can add knowledge). See docs/UI.md. Accounts: python -m app.cli create-demo-users
+# ----------------------------------------------------------------------------
+ui:
+  demo_mode: true                # true = PASSWORDLESS demo sign-in (pick Eileen or AllMinusEileen), the demo switch password is allowed, allow_mock is permitted. Anyone who can reach the site with the service on can become Eileen. SET TO false BEFORE REAL USE.
+  allow_mock: true               # true = ?mock=1 shows fake sample answers. Must be false when demo_mode is false.
+  ask_roles: [super, employee]   # Roles allowed on /ask and the ask API. Roles are the clearance levels. Not signed in = no access. /add has no sign-in or role check.
+
+# ----------------------------------------------------------------------------
+# auth: sign-in behaviour
+# ----------------------------------------------------------------------------
+auth:
+  session_minutes: 480
+  password_min_length: 12        # Applies to new passwords, including the service-switch password when changed.
+  max_failed_logins: 5
+  lockout_minutes: 15
+
+# ----------------------------------------------------------------------------
+# audit: record of who asked what and which sources were returned
+# ----------------------------------------------------------------------------
+audit:
+  enabled: true
+  retain_days: 365
+
+# ----------------------------------------------------------------------------
+# storage: where original uploaded files live
+# ----------------------------------------------------------------------------
+storage:
+  backend: local                 # COST: local = instance disk. s3 = durable and cheap, recommended for real use.
+  local_path: /srv/data/files
+  s3_bucket: ""                  # Used when backend=s3. Empty = derived from project_name at deploy time.
+
+# ----------------------------------------------------------------------------
+# database: Postgres with pgvector, run as a container on the same instance
+# COST: self-hosted instead of a managed database service.
+# ----------------------------------------------------------------------------
+database:
+  host: db
+  port: 5432
+  name: app
+  user: app                      # Password is generated on first boot and never leaves the machine.
