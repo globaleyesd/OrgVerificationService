@@ -1,0 +1,1 @@
+Data tier contract. The hosting term for the database tier ends on 31 March 2028 and renews only by written notice.
