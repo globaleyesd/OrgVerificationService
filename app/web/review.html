@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review documents</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="top">
+  <section class="view reviewbox" id="review" aria-label="Review documents">
+    <div class="card wide">
+      <h2>Review documents</h2>
+      <p>New uploads start at the top level. Choose who can read each document.</p>
+      <p class="err" id="rverr" role="alert"></p>
+      <div class="tablewrap"><table class="docs" id="docs"><thead><tr><th>Document</th><th>Type</th><th>Passages</th><th>Who can read it</th></tr></thead><tbody id="docbody"></tbody></table></div>
+      <p class="empty" id="rvempty" hidden>No documents yet. Add some on the Add page.</p>
+    </div>
+  </section>
+</main>
+<script src="common.js"></script>
+<script src="review.js"></script>
+</body>
+</html>

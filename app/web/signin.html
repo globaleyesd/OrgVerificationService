@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="top">
+  <div class="card wide" id="sppage">
+    <h2>Sign in</h2>
+    <p id="spnow" class="fine" aria-live="polite"></p>
+    <form id="sppicker" autocomplete="off" hidden>
+      <div class="field"><label for="spname">Who are you?</label>
+        <input id="spname" class="plain big" type="text" autocomplete="off" maxlength="60" autocapitalize="none" spellcheck="false"></div>
+      <button type="submit" class="primary" id="spgo">Continue</button>
+    </form>
+    <form id="spform" autocomplete="off" hidden>
+      <div class="field"><label for="spuser">Username</label><input id="spuser" class="plain" type="text" autocomplete="username" maxlength="60"></div>
+      <div class="field"><label for="sppw">Password</label><input id="sppw" type="password" autocomplete="current-password" maxlength="200"></div>
+      <button type="submit" class="primary" id="spbtn">Sign in</button>
+    </form>
+    <p class="err" id="sperr" role="alert"></p>
+    <div class="dlgbtns left">
+      <a class="ghost btnlink" id="spback" href="#">Back</a>
+      <button type="button" class="ghost" id="spout" hidden>Sign out</button>
+    </div>
+  </div>
+</main>
+<script src="common.js"></script>
+<script src="signin.js"></script>
+</body>
+</html>

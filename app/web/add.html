@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add knowledge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <section class="view" id="provider" aria-label="Add knowledge">
+    <div class="left">
+      <div id="dropbox">
+        <textarea id="entry" placeholder="Type or paste knowledge here, or drop files anywhere in this box." aria-label="Knowledge entry"></textarea>
+        <div class="dropbar">
+          <span>Drop files here, or</span>
+          <button type="button" class="ghost" id="browse">choose files</button>
+          <span id="limits"></span>
+          <input type="file" id="picker" multiple hidden>
+        </div>
+      </div>
+      <div class="controls">
+        <span class="grow"></span>
+        <button type="button" class="ghost" id="clear">Clear</button>
+        <button type="button" class="primary" id="submit" disabled>Submit</button>
+      </div>
+    </div>
+    <aside class="right" aria-live="polite">
+      <strong>Queue</strong>
+      <p class="empty" id="qempty">Nothing queued yet.</p>
+      <ul class="queue" id="queue"></ul>
+    </aside>
+  </section>
+</main>
+<script src="common.js"></script>
+<script src="add.js"></script>
+</body>
+</html>

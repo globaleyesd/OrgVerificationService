@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <section class="view" id="consumer" aria-label="Ask questions">
+    <div id="chatcol">
+      <div id="log" role="log" aria-live="polite"></div>
+      <div id="voicehint" hidden>Transcribed from voice. Edit if needed, then press Ask.</div>
+      <div id="suggest" hidden aria-live="polite">
+        <div class="slabel" id="suggestlabel"></div>
+        <div class="schoices" id="suggestchoices"></div>
+      </div>
+      <div id="composer">
+        <button type="button" class="ghost" id="mic" aria-pressed="false" aria-label="Speak your question" hidden>🎤</button>
+        <input id="q" type="text" placeholder="Ask a question…" aria-label="Your question" autocomplete="off">
+        <button type="button" class="primary" id="send">Ask</button>
+      </div>
+    </div>
+    <aside id="sources" aria-label="Source passage">
+      <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Resize source panel (arrow keys)" tabindex="0"></div>
+      <div class="srchead">
+        <div><h2 id="srctitle"></h2><div class="where" id="srcwhere"></div></div>
+        <button type="button" class="ghost" id="collapse" aria-label="Collapse source panel">Collapse ›</button>
+      </div>
+      <div class="verified" id="srcverified" hidden>✓ Quote matched in the source document</div>
+      <div id="srclegend" hidden></div>
+      <div id="srcocc" class="chips" hidden></div>
+      <button type="button" class="ghost" id="srcall" hidden></button>
+      <div id="passage"></div>
+    </aside>
+    <button type="button" id="srctab" aria-label="Show source panel"><span class="chev" aria-hidden="true">‹</span><span>Sources</span></button>
+  </section>
+</main>
+<script src="common.js"></script>
+<script src="ask.js"></script>
+</body>
+</html>
