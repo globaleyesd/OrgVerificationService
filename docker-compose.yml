@@ -1,0 +1,60 @@
+# LOCAL run:
+#   python scripts/init_local.py      (creates a random database password file and an empty config.local.yaml)
+#   cp secrets.example.yaml secrets.local.yaml   (then fill it in; needed for llm.provider: anthropic)
+#   docker compose up --build         then open http://localhost:8000/
+#
+# Linux hosts: run as your own user so the creds/ and data/ folders are writable:
+#   APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build
+#
+# COST: three containers, no extra services. Nothing here is sent anywhere.
+# The ollama service runs the local AI model (llm.provider: local). Download the model once:
+#   docker compose exec ollama ollama pull qwen3:4b
+# NVIDIA GPU: also load docker-compose.gpu.yml (see docs/LOCAL_MODEL.md); without it the model runs on the CPU.
+services:
+  api:
+    build: .
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    ports: ["127.0.0.1:8000:8000"]      # reachable from this machine only
+    depends_on:
+      db: { condition: service_healthy }
+      ollama: { condition: service_started }
+    environment:
+      APP_SECRETS: /run/secrets/app_secrets
+      APP_CONFIG_LOCAL: /srv/config.local.yaml
+    volumes:
+      - ./config.yaml:/srv/config.yaml:ro
+      - ./config.local.yaml:/srv/config.local.yaml:ro   # private overrides (git-ignored)
+      - ./creds:/srv/creds                 # service-switch password record (git-ignored)
+      - ./data:/srv/data                   # on/off state, original files and the search model (git-ignored)
+      - ./samples:/srv/samples:ro          # synthetic demo documents for `app.cli ingest`
+    secrets: [app_secrets, db_password]
+    restart: unless-stopped
+  ollama:
+    image: ollama/ollama:latest
+    volumes: [ollama:/root/.ollama]       # downloaded models (a named volume, so it stays out of the project folder)
+    # No ports: only the api container talks to it. To reach it from this machine, add ports: ["127.0.0.1:11434:11434"].
+    restart: unless-stopped
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes: [pgdata:/var/lib/postgresql/data]
+    secrets: [db_password]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 1h                       # hourly once running
+      start_period: 60s
+      start_interval: 2s                 # but every 2 s while starting, so the api is not held back
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+secrets:
+  app_secrets:
+    file: ./secrets.local.yaml
+  db_password:
+    file: ./data/db_password
+volumes:
+  pgdata:
+  ollama:

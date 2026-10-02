@@ -1,0 +1,18 @@
+# Nothing secret or local may enter an image.
+creds/
+secrets.local.yaml
+*.local.yaml
+.env
+.env.*
+*.pem
+*.key
+.aws/
+data/
+.git
+.vscode/
+deploy/
+docs/
+tests/
+scripts/
+__pycache__/
+*.md
