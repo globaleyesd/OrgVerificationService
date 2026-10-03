@@ -1,0 +1,70 @@
+{
+  "project": "kb-verifier",
+  "region": "us-east-1",
+  "currency": "USD",
+  "basis": "config.yaml costs.rates (estimates)",
+  "services": [
+    {
+      "name": "EC2 server (t4g.small)",
+      "monthly_usd": 12.26,
+      "billed_at": [
+        "running"
+      ],
+      "what": "The server running the app, database and search"
+    },
+    {
+      "name": "Elastic IP (public IPv4 address)",
+      "monthly_usd": 3.65,
+      "billed_at": [
+        "running",
+        "stopped"
+      ],
+      "what": "Billed every hour it exists, also while the server is stopped"
+    },
+    {
+      "name": "EBS disk (20 GB gp3)",
+      "monthly_usd": 1.6,
+      "billed_at": [
+        "running",
+        "stopped"
+      ],
+      "what": "The server's disk, kept while stopped, deleted at zero"
+    },
+    {
+      "name": "ECR image storage (about 1.5 GB)",
+      "monthly_usd": 0.15,
+      "billed_at": [
+        "running",
+        "stopped",
+        "zero"
+      ],
+      "what": "The 3 newest server images"
+    },
+    {
+      "name": "S3 storage (about 1 GB)",
+      "monthly_usd": 0.02,
+      "billed_at": [
+        "running",
+        "stopped",
+        "zero"
+      ],
+      "what": "Documents, database backups, the page and the credential records"
+    },
+    {
+      "name": "AI answers (Amazon Bedrock)",
+      "monthly_usd": null,
+      "usage": "per question; set llm.model_answer to a Bedrock model to price it",
+      "billed_at": [
+        "running"
+      ],
+      "what": "Only when someone asks a question"
+    }
+  ],
+  "free_tier": [
+    "CloudFront (page and API)",
+    "Lambda (switch and power functions)",
+    "CloudWatch Logs (14 days)",
+    "Systems Manager",
+    "AWS Budgets (first two)"
+  ]
+}
