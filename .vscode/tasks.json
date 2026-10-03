@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Deploy: preview all steps (dry run)", "type": "shell", "command": "python deploy/deploy.py all --dry-run", "problemMatcher": [] },
+    { "label": "Deploy: everything", "type": "shell", "command": "python deploy/deploy.py all", "problemMatcher": [] },
+    { "label": "Deploy: AWS stack only", "type": "shell", "command": "python deploy/deploy.py stack", "problemMatcher": [] },
+    { "label": "Deploy: build and push image", "type": "shell", "command": "python deploy/deploy.py image", "problemMatcher": [] },
+    { "label": "Deploy: upload web page", "type": "shell", "command": "python deploy/deploy.py ui", "problemMatcher": [] },
+    { "label": "Deploy: upload non-secret config", "type": "shell", "command": "python deploy/deploy.py config", "problemMatcher": [] },
+    { "label": "Deploy: update server", "type": "shell", "command": "python deploy/deploy.py update", "problemMatcher": [] },
+    { "label": "Deploy: show site address and names", "type": "shell", "command": "python deploy/deploy.py outputs", "problemMatcher": [] },
+    { "label": "Local: run tests", "type": "shell", "command": "python -m unittest discover -s tests -t .", "problemMatcher": [] },
+    { "label": "Local: start with Docker", "type": "shell", "command": "docker compose up --build", "problemMatcher": [] }
+  ]
+}

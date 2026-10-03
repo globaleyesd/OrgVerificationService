@@ -1,0 +1,51 @@
+# Runs on the AWS instance (copied there by deploy/deploy.py, started by /opt/app/update.sh).
+# TLS ends at CloudFront, so the API is published on port 80 and the security group only lets
+# CloudFront reach it. The page itself is served from S3, so the container serves API only.
+# No secret is passed in: the database password is generated on the instance, credentials (password
+# hashes, user accounts) live in a private S3 bucket reached through the instance's IAM role, and AI
+# calls use the same role (llm.provider: bedrock), so no API key is needed.
+services:
+  api:
+    image: ${IMAGE}
+    ports: ["80:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      APP_CONFIG_LOCAL: /srv/config.local.yaml
+      APP_SERVICE_SWITCH_MODE: aws                   # the AWS control function is the only switch; "on" simply means this server is running
+      APP_STORAGE_BACKEND: s3                        # original files go to the private documents bucket
+      APP_STORAGE_S3_BUCKET: ${DATA_BUCKET}
+      APP_CREDENTIALS_BACKEND: s3                    # password hashes and user accounts live in the private credentials bucket
+      APP_CREDENTIALS_S3_BUCKET: ${CREDS_BUCKET}     # a bucket NAME, not a secret (written to .env by update.sh)
+      AWS_DEFAULT_REGION: ${AWS_REGION_NAME}
+    volumes:
+      - ./config.yaml:/srv/config.yaml:ro
+      - ./config.local.yaml:/srv/config.local.yaml:ro
+      - data:/srv/data
+    secrets: [db_password]
+    mem_limit: 900m
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+  db:
+    image: pgvector/pgvector:pg16
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=20"]
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes: [pgdata:/var/lib/postgresql/data]
+    secrets: [db_password]
+    mem_limit: 700m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+secrets:
+  db_password:
+    file: ./db_password
+volumes:
+  pgdata:
+  data:

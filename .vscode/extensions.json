@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "amazonwebservices.aws-toolkit-vscode",
+    "kddejong.vscode-cfn-lint",
+    "ms-azuretools.vscode-docker",
+    "redhat.vscode-yaml",
+    "ms-python.python"
+  ]
+}

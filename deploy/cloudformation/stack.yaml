@@ -1,0 +1,940 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Cheapest practical stack: one small ARM server running Docker (API + database), a private S3 bucket
+  serving the web page through CloudFront, private S3 bucket for documents, a locked-down S3 bucket for password hashes, a tiny switch function that starts and stops the server, a power adapter the Control Center uses to take the project to zero and back, ECR for the image, optional
+  budget alert and optional working-hours schedule. No NAT gateway, no load balancer, no managed database,
+  no WAF, no CloudWatch agent (all deliberate COST decisions, listed in deploy/README.md).
+  Nothing secret is stored in this template or sent to AWS by it.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: kb-verifier
+    AllowedPattern: '^[a-z0-9][a-z0-9-]{1,28}$'
+    Description: Neutral name used for tags and resource names.
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: >
+      Amazon Linux 2023 ARM64 image. deploy/deploy.py looks it up once and then reuses it, so the server is
+      never replaced just because a newer image was published (the database lives on its disk).
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.micro, t4g.small, t4g.medium]
+    Description: COST - smallest ARM sizes only. t4g.small has 2 GiB memory.
+  RootVolumeGb:
+    Type: Number
+    Default: 20
+    MinValue: 8
+    MaxValue: 200
+  CloudFrontPrefixListId:
+    Type: String
+    AllowedPattern: '^pl-[0-9a-f]+$'
+    Description: >
+      AWS-managed prefix list of CloudFront origin-facing addresses. deploy/deploy.py looks it up with
+      aws ec2 describe-managed-prefix-lists (name com.amazonaws.global.cloudfront.origin-facing).
+  AllowBedrock:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Give the server permission to call Amazon Bedrock (needed when llm.provider is bedrock, so no API key is ever stored).
+  ImageTag:
+    Type: String
+    Default: latest
+  BudgetLimitUsd:
+    Type: Number
+    Default: 40
+  BudgetEmail:
+    Type: String
+    Default: ''
+    Description: Optional. Receives budget alerts. Leave empty to skip creating the budget.
+  ScheduleEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: COST - stop the server outside working hours (Mon-Fri).
+  ScheduleTimezone:
+    Type: String
+    Default: UTC
+  StartHour:
+    Type: Number
+    Default: 8
+    MinValue: 0
+    MaxValue: 23
+  StopHour:
+    Type: Number
+    Default: 18
+    MinValue: 0
+    MaxValue: 23
+  SwitchMaxFailedAttempts:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Wrong switch passwords before the control function locks (matches service_switch.max_failed_attempts).
+  SwitchLockoutMinutes:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    Description: Lockout length in minutes (matches service_switch.lockout_minutes).
+  Power:
+    Type: String
+    Default: 'on'
+    AllowedValues: ['on', 'zero']
+    Description: >
+      Set by the Control Center's power adapter, not by hand. 'zero' removes the server, its disk and its Elastic IP
+      (COST - nothing billed by the hour); the database is backed up to the documents bucket first and restored when
+      it comes back 'on'. Buckets, the page and the image stay.
+
+Conditions:
+  HasBudgetEmail: !Not [!Equals [!Ref BudgetEmail, '']]
+  ScheduleOn: !Equals [!Ref ScheduleEnabled, 'true']
+  BedrockOn: !Equals [!Ref AllowBedrock, 'true']
+  IsUsEast1: !Equals [!Ref 'AWS::Region', 'us-east-1']
+  PowerOn: !Equals [!Ref Power, 'on']
+  ScheduleActive: !And [!Condition ScheduleOn, !Condition PowerOn]
+
+Resources:
+  # ------------------------------------------------------------------ network (all free of charge)
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: !Sub '${ProjectName}-vpc'}, {Key: Project, Value: !Ref ProjectName}]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.0.0/26
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false          # the server gets one Elastic IP below, nothing else is public
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Only CloudFront may reach the server, on port 80. No SSH at all: use SSM Session Manager.
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web port from CloudFront only. No inbound SSH.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontPrefixListId
+          Description: CloudFront origin-facing addresses only
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+
+  # ------------------------------------------------------------------ storage
+  # Web page bucket: fully private. Only the CloudFront distribution below can read it.
+  UiBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      VersioningConfiguration: {Status: Enabled}
+      LifecycleConfiguration:
+        Rules:
+          - {Id: expire-old-versions, Status: Enabled, NoncurrentVersionExpiration: {NoncurrentDays: 30}, AbortIncompleteMultipartUpload: {DaysAfterInitiation: 3}}
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  UiBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UiBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt UiBucket.Arn, !Sub '${UiBucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: 's3:GetObject'
+            Resource: !Sub '${UiBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  # Documents bucket (also holds the non-secret deploy files). Private, encrypted, versioned, kept if the stack is deleted.
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      VersioningConfiguration: {Status: Enabled}
+      LifecycleConfiguration:
+        Rules:
+          - {Id: expire-old-versions, Status: Enabled, NoncurrentVersionExpiration: {NoncurrentDays: 30}, AbortIncompleteMultipartUpload: {DaysAfterInitiation: 3}}
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt DataBucket.Arn, !Sub '${DataBucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+
+  # Credentials bucket: holds ONLY salted password hashes (service switch, user accounts) and the key that signs sign-in
+  # cookies. Private, encrypted, versioned, and readable/writable by the server's IAM role and nobody else.
+  # Records are created on the server; the deploy script cannot upload to this bucket (it is not on its allow-list).
+  # COST: a handful of tiny objects and a few requests a day, effectively free. SSE-S3 is used instead of a KMS key
+  # (a customer key would add a monthly fee).
+  CredsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      VersioningConfiguration: {Status: Enabled}
+      LifecycleConfiguration:
+        Rules:
+          - {Id: expire-old-versions, Status: Enabled, NoncurrentVersionExpiration: {NoncurrentDays: 7}, AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}}
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  CredsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CredsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt CredsBucket.Arn, !Sub '${CredsBucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+          # Everyone except the server's role and the control function's role is refused, including administrators.
+          # This is deliberate. To get in (break-glass) an administrator must first change this bucket policy, which
+          # leaves a CloudTrail record. The control role's own IAM policy limits it to the two switch records.
+          - Sid: OnlyTheServerRoleMayTouchRecords
+            Effect: Deny
+            Principal: '*'
+            Action: ['s3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:DeleteObject', 's3:DeleteObjectVersion', 's3:ListBucket', 's3:ListBucketVersions']
+            Resource: [!GetAtt CredsBucket.Arn, !Sub '${CredsBucket.Arn}/*']
+            Condition:
+              StringNotEquals:
+                'aws:PrincipalArn': [!GetAtt ServerRole.Arn, !GetAtt ControlRole.Arn]
+
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ProjectName
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: AES256}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"COST - keep only the 3 newest images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}'
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+
+  # ------------------------------------------------------------------ web page + API entry point
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-ui-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  SecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${ProjectName}-security-headers'
+        SecurityHeadersConfig:
+          StrictTransportSecurity: {AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true, Override: true}
+          ContentTypeOptions: {Override: true}
+          FrameOptions: {FrameOption: DENY, Override: true}
+          ReferrerPolicy: {ReferrerPolicy: no-referrer, Override: true}
+          ContentSecurityPolicy:
+            Override: true
+            # Same policy as app/pages.py (a test keeps them identical). No inline scripts or styles are allowed.
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        CustomHeadersConfig:
+          Items:
+            - {Header: Permissions-Policy, Value: 'microphone=(self), camera=(), geolocation=()', Override: true}
+  # Clean page addresses: /ask -> ask.html, /add -> add.html (the same map as app/pages.py; a test checks it).
+  # COST: CloudFront Functions are billed per request after a free allowance, a tiny amount at this scale.
+  UrlRewrite:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${ProjectName}-url-rewrite'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Map /ask, /add, /review and /signin to their html files
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var pages = { '/ask': '/ask.html', '/add': '/add.html', '/review': '/review.html', '/signin': '/signin.html' };
+          var uri = request.uri;
+          if (uri.length > 1 && uri.charAt(uri.length - 1) === '/') {
+            var bare = uri.slice(0, -1);
+            if (pages[bare]) {
+              return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: bare } } };
+            }
+          }
+          if (pages[uri]) { request.uri = pages[uri]; }
+          return request;
+        }
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${ProjectName} page and API'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100            # COST - cheapest edge locations
+        Origins:
+          - Id: ui
+            DomainName: !GetAtt UiBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: {OriginAccessIdentity: ''}
+          - !If
+            - PowerOn
+            - Id: api
+              # Public DNS name of the Elastic IP (stable across stop/start).
+              DomainName: !Sub
+                - 'ec2-${Dashed}.${Suffix}'
+                - Dashed: !Join ['-', !Split ['.', !Ref ServerIp]]
+                  Suffix: !If [IsUsEast1, 'compute-1.amazonaws.com', !Sub '${AWS::Region}.compute.amazonaws.com']
+              CustomOriginConfig:
+                OriginProtocolPolicy: http-only   # see "Known gaps" in deploy/README.md: CloudFront to server is not encrypted
+                HTTPPort: 80
+                OriginReadTimeout: 60
+            - !Ref 'AWS::NoValue'     # at zero there is no server: /api/* goes to the switch function, which answers "Service offline"
+          - Id: control
+            DomainName: !Select [2, !Split ['/', !GetAtt ControlUrl.FunctionUrl]]
+            OriginAccessControlId: !GetAtt ControlOriginAccessControl.Id
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: ui
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6          # Managed-CachingOptimized
+          ResponseHeadersPolicyId: !Ref SecurityHeaders
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt UrlRewrite.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: !If [PowerOn, api, control]
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref SecurityHeaders
+          - PathPattern: /control/*
+            TargetOriginId: control
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+            ResponseHeadersPolicyId: !Ref SecurityHeaders
+        # While the server is stopped the /api origin cannot be reached (502/504). Answer with the same JSON the app
+        # itself uses for "Service offline", so the page and any direct caller get a clear message.
+        CustomErrorResponses:
+          - {ErrorCode: 502, ResponseCode: 503, ResponsePagePath: /offline.json, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 504, ResponseCode: 503, ResponsePagePath: /offline.json, ErrorCachingMinTTL: 0}
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+
+  # ------------------------------------------------------------------ the server
+  ServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      ManagedPolicyArns: [!Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore']
+      Policies:
+        - PolicyName: least-privilege-app
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Sid: EcrLogin, Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Sid: EcrPull
+                Effect: Allow
+                Action: ['ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage']
+                Resource: !GetAtt Repository.Arn
+              - Sid: CredentialsList
+                Effect: Allow
+                Action: 's3:ListBucket'
+                Resource: !GetAtt CredsBucket.Arn
+              - Sid: CredentialsReadWrite
+                Effect: Allow
+                Action: ['s3:GetObject', 's3:PutObject']
+                Resource: !Sub '${CredsBucket.Arn}/*'
+              - Sid: DataBucketList
+                Effect: Allow
+                Action: 's3:ListBucket'
+                Resource: !GetAtt DataBucket.Arn
+              - Sid: DataBucketObjects
+                Effect: Allow
+                Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject']
+                Resource: !Sub '${DataBucket.Arn}/*'
+              - !If
+                - BedrockOn
+                - Sid: BedrockInvoke
+                  Effect: Allow
+                  Action: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream']
+                  Resource: [!Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*', !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*']
+                - !Ref 'AWS::NoValue'
+  ServerProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref ServerRole]
+  Server:
+    Type: AWS::EC2::Instance
+    Condition: PowerOn
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref ServerSecurityGroup]
+      IamInstanceProfile: !Ref ServerProfile
+      Monitoring: false                       # COST - no detailed monitoring
+      CreditSpecification: {CPUCredits: standard}   # COST - never pay for surplus CPU credits (may throttle under sustained load)
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled, HttpPutResponseHopLimit: 2}   # IMDSv2 only; hop limit 2 lets containers use the role
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeType: gp3, VolumeSize: !Ref RootVolumeGb, Encrypted: true, DeleteOnTermination: true}
+      Tags: [{Key: Name, Value: !Sub '${ProjectName}-server'}, {Key: Project, Value: !Ref ProjectName}]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y docker
+          mkdir -p /etc/docker
+          cat > /etc/docker/daemon.json <<'EOF'
+          { "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+          EOF
+          systemctl enable --now docker
+          mkdir -p /usr/local/lib/docker/cli-plugins /opt/app
+          curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-aarch64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          cat > /opt/app/update.sh <<'EOS'
+          #!/bin/bash
+          # Pulls the latest non-secret deploy files and image, then (re)starts the stack. Contains no secrets.
+          set -euo pipefail
+          cd /opt/app
+          aws s3 cp s3://${DataBucket}/deploy/docker-compose.aws.yml ./docker-compose.aws.yml --region ${AWS::Region}
+          aws s3 cp s3://${DataBucket}/deploy/config.yaml ./config.yaml --region ${AWS::Region}
+          aws s3 cp s3://${DataBucket}/deploy/config.local.yaml ./config.local.yaml --region ${AWS::Region} 2>/dev/null || echo '{}' > ./config.local.yaml
+          # The database password is created here, once, and never leaves this machine.
+          [ -f db_password ] || { umask 077; head -c 32 /dev/urandom | base64 | tr -d '\n=' > db_password; }
+          echo "IMAGE=${Repository.RepositoryUri}:${ImageTag}" > .env
+          echo "CREDS_BUCKET=${CredsBucket}" >> .env
+          echo "DATA_BUCKET=${DataBucket}" >> .env
+          echo "AWS_REGION_NAME=${AWS::Region}" >> .env
+          aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+          docker compose -f docker-compose.aws.yml --env-file .env pull
+          # First start of a new server (for example coming back from zero): restore the latest database backup BEFORE
+          # the app starts, so the app never creates empty tables first. Runs once per server.
+          if [ ! -f .restored ]; then
+            docker compose -f docker-compose.aws.yml --env-file .env up -d db
+            for n in $(seq 1 30); do docker compose -f docker-compose.aws.yml --env-file .env exec -T db pg_isready -U app -d app && break; sleep 2; done
+            if aws s3 ls s3://${DataBucket}/backups/db-latest.sql.gz --region ${AWS::Region} >/dev/null 2>&1; then
+              aws s3 cp s3://${DataBucket}/backups/db-latest.sql.gz - --region ${AWS::Region} | gunzip | docker compose -f docker-compose.aws.yml --env-file .env exec -T db psql -q -U app -d app
+            fi
+            touch .restored
+          fi
+          docker compose -f docker-compose.aws.yml --env-file .env up -d --remove-orphans
+          docker image prune -f
+          EOS
+          chmod +x /opt/app/update.sh
+          cat > /opt/app/backup.sh <<'EOS'
+          #!/bin/bash
+          # Run by the power adapter before the project goes to zero. Dumps the database to the documents bucket.
+          set -euo pipefail
+          cd /opt/app
+          f=/tmp/db-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+          docker compose -f docker-compose.aws.yml --env-file .env exec -T db pg_dump -U app -d app --clean --if-exists | gzip > "$f"
+          [ -s "$f" ] || { echo "empty backup"; exit 1; }
+          aws s3 cp "$f" s3://${DataBucket}/backups/$(basename "$f") --region ${AWS::Region}
+          aws s3 cp "$f" s3://${DataBucket}/backups/db-latest.sql.gz --region ${AWS::Region}
+          rm -f "$f"
+          EOS
+          chmod +x /opt/app/backup.sh
+          /opt/app/update.sh || echo "Image not pushed yet. Push it, then run the update step."
+  ServerIp:
+    Type: AWS::EC2::EIP
+    Condition: PowerOn
+    Properties:
+      Domain: vpc
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
+  ServerIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Condition: PowerOn
+    Properties:
+      AllocationId: !GetAtt ServerIp.AllocationId
+      InstanceId: !Ref Server
+
+  # ------------------------------------------------------------------ the switch: the ONLY door that turns the server on or off
+  # A tiny function that checks the switch password and then starts or stops the server, so "off" really stops the
+  # compute charge. It is reachable only through CloudFront (/control/*), which signs its requests (origin access control).
+  # COST: a few invocations a day stay inside the Lambda free tier; logs are kept 14 days. The source is deploy/lambda/control.py
+  # and a test keeps this inline copy identical to it.
+  ControlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-control'
+      RetentionInDays: 14
+  ControlRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: switch-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Sid: Logs, Effect: Allow, Action: ['logs:CreateLogStream', 'logs:PutLogEvents'], Resource: !GetAtt ControlLogGroup.Arn}
+              - Sid: StartStopThisServerOnly       # by tag: the server is removed and recreated when the project goes to zero and back
+                Effect: Allow
+                Action: ['ec2:StartInstances', 'ec2:StopInstances']
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition: {StringEquals: {'aws:ResourceTag/Project': !Ref ProjectName}}
+              - {Sid: ReadServerState, Effect: Allow, Action: 'ec2:DescribeInstances', Resource: '*'}   # describe cannot be limited to one resource
+              - Sid: ListForMissingKeyAnswers          # lets "record not found" be told apart from "access denied"
+                Effect: Allow
+                Action: 's3:ListBucket'
+                Resource: !GetAtt CredsBucket.Arn
+              - Sid: ReadSwitchRecords
+                Effect: Allow
+                Action: 's3:GetObject'
+                Resource: [!Sub '${CredsBucket.Arn}/service_switch.json', !Sub '${CredsBucket.Arn}/switch_lockout.json']
+              - Sid: WriteLockoutRecordOnly
+                Effect: Allow
+                Action: 's3:PutObject'
+                Resource: !Sub '${CredsBucket.Arn}/switch_lockout.json'
+  ControlFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ControlLogGroup
+    Properties:
+      FunctionName: !Sub '${ProjectName}-control'
+      Runtime: python3.12
+      Architectures: [arm64]                  # COST - cheaper per millisecond
+      Handler: index.handler
+      Role: !GetAtt ControlRole.Arn
+      Timeout: 15
+      MemorySize: 512                         # scrypt needs the CPU share that comes with this size
+      Environment:
+        Variables:
+          CREDS_BUCKET: !Ref CredsBucket
+          PROJECT: !Ref ProjectName
+          MAX_FAILS: !Ref SwitchMaxFailedAttempts
+          LOCK_MIN: !Ref SwitchLockoutMinutes
+      Code:
+        ZipFile: |
+          """AWS-only service switch. Password-checks, then starts or stops the server. Also answers /api/* while the project
+          is at zero (no server). Inline in the template (keep under 4096 bytes). Same password record as app/passwords.py."""
+          import base64, hashlib, hmac, json, os, time
+          import boto3
+          B, P = os.environ["CREDS_BUCKET"], os.environ["PROJECT"]
+          MAXF, LOCK = int(os.environ.get("MAX_FAILS", 5)), float(os.environ.get("LOCK_MIN", 10)) * 60
+          s3, ec2 = boto3.client("s3"), boto3.client("ec2")
+
+          def get(k):
+              try:
+                  return json.loads(s3.get_object(Bucket=B, Key=k + ".json")["Body"].read())
+              except s3.exceptions.NoSuchKey:
+                  return None
+
+          def put(k, d):
+              s3.put_object(Bucket=B, Key=k + ".json", Body=json.dumps(d).encode(), ServerSideEncryption="AES256")
+
+          def good(pw, r):
+              try:
+                  h = hashlib.scrypt(pw.encode(), salt=base64.b64decode(r["salt"]), n=r["n"], r=r["r"], p=r["p"], dklen=r["dklen"])
+                  return hmac.compare_digest(h, base64.b64decode(r["hash"]))
+              except Exception:
+                  return False
+
+          def server():
+              f = [{"Name": "tag:Project", "Values": [P]}, {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}]
+              for r in ec2.describe_instances(Filters=f)["Reservations"]:
+                  for i in r["Instances"]:
+                      return i["InstanceId"], i["State"]["Name"]
+              return None, "zero"
+
+          def out(code, body):
+              return {"statusCode": code, "headers": {"content-type": "application/json", "cache-control": "no-store"}, "body": json.dumps(body)}
+
+          def handler(event, context):
+              raw_path, method = event.get("rawPath", ""), event["requestContext"]["http"]["method"]
+              if raw_path.startswith("/api/"):   # routed here only while the project is at zero
+                  return out(503, {"detail": "Service offline", "offline": True})
+              path = raw_path.rstrip("/").rsplit("/", 1)[-1]
+              try:
+                  if method == "GET" and path == "status":
+                      st = server()[1]
+                      return out(200, {"state": st, "on": st in ("pending", "running")})
+                  if method != "POST" or path not in ("on", "off"):
+                      return out(404, {"detail": "Not found"})
+                  raw = event.get("body") or "{}"
+                  pw = json.loads(base64.b64decode(raw) if event.get("isBase64Encoded") else raw).get("password")
+                  now, lk, rec = time.time(), get("switch_lockout") or {}, get("service_switch")
+                  if now < lk.get("until", 0):
+                      return out(429, {"detail": "Too many attempts. Try again in %d minute(s)." % -(-(lk["until"] - now) // 60)})
+                  if rec is None:
+                      return out(503, {"detail": "The switch password is not set up yet"})
+                  if not isinstance(pw, str) or not good(pw, rec):
+                      n = lk.get("n", 0) + 1
+                      locked = n >= MAXF
+                      put("switch_lockout", {"n": 0, "until": now + LOCK} if locked else {"n": n, "until": 0})
+                      return out(429 if locked else 401, {"detail": "Too many attempts. Try again later." if locked else "Wrong password"})
+                  if lk.get("n"):
+                      put("switch_lockout", {"n": 0, "until": 0})
+                  i, st = server()
+                  if st == "zero":
+                      return out(409, {"detail": "This project is at zero. Bring it back from the Control Center."})
+                  if path == "on":
+                      if st == "stopping":
+                          return out(409, {"detail": "The server is still shutting down. Try again in a minute."})
+                      if st == "stopped":
+                          ec2.start_instances(InstanceIds=[i])
+                          st = "pending"
+                  else:
+                      if st == "pending":
+                          return out(409, {"detail": "The server is still starting. Try again in a minute."})
+                      if st == "running":
+                          ec2.stop_instances(InstanceIds=[i])
+                          st = "stopping"
+                  return out(200, {"state": st, "on": st in ("pending", "running")})
+              except Exception as e:
+                  print("control error", type(e).__name__)
+                  return out(503, {"detail": "Control is unavailable right now"})
+  ControlUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ControlFunction.Arn
+      AuthType: AWS_IAM                       # only a signed request gets in: the raw address cannot be called directly
+  ControlInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ControlFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+      FunctionUrlAuthType: AWS_IAM
+  ControlInvokePermission:                    # newer function URLs also want this one; harmless otherwise
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ControlFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+  ControlOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-control-oac'
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ------------------------------------------------------------------ power adapter for the Control Center
+  # The Control Center (a separate project) invokes this function to take the project to on, off (stopped) or zero
+  # (server, disk and IP removed after a database backup). It has no URL: only the Control Center's role can invoke it,
+  # and the Control Center checks its own password before every action. To go to zero and back it updates THIS stack's
+  # Power parameter with its own permissions (listed below: exactly what that change creates and removes).
+  # COST: a few invocations a month; logs kept 14 days. Source: deploy/lambda/power.py (a test keeps this copy identical).
+  PowerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-power'
+      RetentionInDays: 14
+  PowerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: power-levels-for-this-project
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Sid: Logs, Effect: Allow, Action: ['logs:CreateLogStream', 'logs:PutLogEvents'], Resource: !GetAtt PowerLogGroup.Arn}
+              - Sid: ThisStackOnly
+                Effect: Allow
+                Action: ['cloudformation:DescribeStacks', 'cloudformation:UpdateStack']
+                Resource: !Ref 'AWS::StackId'
+              - Sid: StartStopThisProjectsServer
+                Effect: Allow
+                Action: ['ec2:StartInstances', 'ec2:StopInstances', 'ec2:TerminateInstances']
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition: {StringEquals: {'aws:ResourceTag/Project': !Ref ProjectName}}
+              - Sid: RecreateTheServerAndItsAddress   # what CloudFormation needs to bring the server and its Elastic IP back
+                Effect: Allow
+                Action: ['ec2:RunInstances', 'ec2:CreateTags', 'ec2:AllocateAddress', 'ec2:ReleaseAddress', 'ec2:AssociateAddress',
+                         'ec2:DisassociateAddress', 'ec2:Describe*', 'ec2:ModifyInstanceAttribute']
+                Resource: '*'
+                Condition: {StringEquals: {'aws:RequestedRegion': !Ref 'AWS::Region'}}
+              - Sid: HandTheServerItsRole
+                Effect: Allow
+                Action: 'iam:PassRole'
+                Resource: !GetAtt ServerRole.Arn
+              - Sid: RepointTheDistribution
+                Effect: Allow
+                Action: ['cloudfront:GetDistribution', 'cloudfront:GetDistributionConfig', 'cloudfront:UpdateDistribution',
+                         'cloudfront:TagResource', 'cloudfront:ListTagsForResource']
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+              - !If
+                - ScheduleOn
+                - Sid: WorkingHoursSchedules
+                  Effect: Allow
+                  Action: ['scheduler:CreateSchedule', 'scheduler:DeleteSchedule', 'scheduler:GetSchedule', 'scheduler:UpdateSchedule', 'iam:PassRole']
+                  Resource: [!Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/${ProjectName}-*', !GetAtt SchedulerRole.Arn]
+                - !Ref 'AWS::NoValue'
+              - Sid: BackUpTheDatabase
+                Effect: Allow
+                Action: 'ssm:SendCommand'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript'
+                  - !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition: {StringEqualsIfExists: {'aws:ResourceTag/Project': !Ref ProjectName}}
+              - {Sid: WatchTheBackup, Effect: Allow, Action: ['ssm:GetCommandInvocation', 'ssm:DescribeInstanceInformation'], Resource: '*'}
+              - Sid: RememberTheLastAction
+                Effect: Allow
+                Action: ['s3:GetObject', 's3:PutObject']
+                Resource: !Sub '${DataBucket.Arn}/control/*'
+  PowerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: PowerLogGroup
+    Properties:
+      FunctionName: !Sub '${ProjectName}-power'      # the Control Center may invoke only functions named *-power
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: index.handler
+      Role: !GetAtt PowerRole.Arn
+      Timeout: 900                            # going to zero waits for the database backup (a few minutes)
+      MemorySize: 128
+      Environment:
+        Variables:
+          PROJECT: !Ref ProjectName
+          STACK: !Ref 'AWS::StackName'
+          DATA_BUCKET: !Ref DataBucket
+      Code:
+        ZipFile: |
+          """Control Center power adapter (status|on|off|zero). Only the Control Center may invoke it (IAM)."""
+          import json, os, time
+          import boto3
+          P, S, D, K = os.environ["PROJECT"], os.environ["STACK"], os.environ["DATA_BUCKET"], "control/power.json"
+          ec2, cfn, ssm, s3 = (boto3.client(n) for n in ("ec2", "cloudformation", "ssm", "s3"))
+          LV = {"running": "running", "pending": "starting", "stopping": "stopping", "stopped": "stopped"}
+
+          def server():
+              f = [{"Name": "tag:Project", "Values": [P]}, {"Name": "instance-state-name", "Values": list(LV)}]
+              for r in ec2.describe_instances(Filters=f)["Reservations"]:
+                  for i in r["Instances"]:
+                      return i["InstanceId"], i["State"]["Name"]
+              return None, None
+
+          def stack():
+              s = cfn.describe_stacks(StackName=S)["Stacks"][0]
+              return s["StackStatus"], {p["ParameterKey"]: p.get("ParameterValue") for p in s.get("Parameters", [])}
+
+          def note(**d):
+              s3.put_object(Bucket=D, Key=K, Body=json.dumps(dict(d, at=time.time())).encode(), ServerSideEncryption="AES256")
+
+          def status():
+              st, ps = stack()
+              try: n = json.loads(s3.get_object(Bucket=D, Key=K)["Body"].read())
+              except Exception: n = {}
+              z, age = ps.get("Power") == "zero", time.time() - n.get("at", 0)
+              if st.endswith("_IN_PROGRESS"):
+                  return {"level": "changing", "detail": "Going %s (%s)" % ("to zero" if z else "on", st)}
+              if n.get("phase") == "backup" and age < 1500:
+                  return {"level": "changing", "detail": "Backing up the database"}
+              err = n.get("error", "") if age < 86400 else ""
+              if z:
+                  return {"level": "zero", "detail": err or "Data kept in S3"}
+              return {"level": LV.get(server()[1], "unknown"), "detail": err}
+
+          def power(v):
+              pp = [{"ParameterKey": k, "UsePreviousValue": True} for k in stack()[1] if k != "Power"]
+              cfn.update_stack(StackName=S, UsePreviousTemplate=True, Capabilities=["CAPABILITY_IAM"],
+                               Parameters=pp + [{"ParameterKey": "Power", "ParameterValue": v}])
+
+          def wait(ok, secs):
+              end = time.time() + secs
+              while time.time() < end:
+                  if ok():
+                      return True
+                  time.sleep(10)
+
+          def backup(i, s):
+              if s == "stopped":
+                  ec2.start_instances(InstanceIds=[i])
+              up = lambda: any(x["PingStatus"] == "Online" for x in ssm.describe_instance_information(
+                  Filters=[{"Key": "InstanceIds", "Values": [i]}])["InstanceInformationList"])
+              if not wait(up, 420):
+                  raise RuntimeError("server not online for backup")
+              c = ssm.send_command(InstanceIds=[i], DocumentName="AWS-RunShellScript",
+                                   Parameters={"commands": ["/opt/app/backup.sh"]})["Command"]["CommandId"]
+              r = {}
+              def done():
+                  try: r.update(ssm.get_command_invocation(CommandId=c, InstanceId=i))
+                  except Exception: return False
+                  return r["Status"] not in ("Pending", "InProgress", "Delayed")
+              wait(done, 600)
+              if r.get("Status") != "Success":
+                  raise RuntimeError("backup failed (%s)" % r.get("Status", "timeout"))
+
+          def handler(event, context):
+              a = (event or {}).get("action")
+              try:
+                  if a == "status":
+                      return status()
+                  st, ps = stack()
+                  z, (i, s) = ps.get("Power") == "zero", server()
+                  if a not in ("on", "off", "zero"):
+                      return {"ok": False, "detail": "Unknown action"}
+                  if st.endswith("_IN_PROGRESS") or (s in ("pending", "stopping") and not z):
+                      return {"ok": False, "detail": "Busy, try again in a minute"}
+                  if a == "on" and z:
+                      note(phase="rebuild")
+                      power("on")
+                  elif a == "on" and s == "stopped":
+                      ec2.start_instances(InstanceIds=[i])
+                  elif a == "off" and s == "running":
+                      ec2.stop_instances(InstanceIds=[i])
+                  elif a == "zero" and not z:
+                      note(phase="backup")
+                      backup(i, s)
+                      note(phase="remove")
+                      power("zero")
+                  return dict(status(), ok=True)
+              except Exception as e:
+                  print("power error", e)
+                  note(phase="failed", error="Last action failed: %s" % e)
+                  return {"ok": False, "detail": str(e)}
+
+  # ------------------------------------------------------------------ optional: working-hours schedule
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Condition: ScheduleOn
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: scheduler.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: start-stop-this-server-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ['ec2:StartInstances', 'ec2:StopInstances']
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition: {StringEquals: {'aws:ResourceTag/Project': !Ref ProjectName}}
+  StartSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: ScheduleActive
+    Properties:
+      Name: !Sub '${ProjectName}-start'
+      ScheduleExpression: !Sub 'cron(0 ${StartHour} ? * MON-FRI *)'
+      ScheduleExpressionTimezone: !Ref ScheduleTimezone
+      FlexibleTimeWindow: {Mode: 'OFF'}
+      Target:
+        Arn: 'arn:aws:scheduler:::aws-sdk:ec2:startInstances'
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"InstanceIds":["${Server}"]}'
+  StopSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: ScheduleActive
+    Properties:
+      Name: !Sub '${ProjectName}-stop'
+      ScheduleExpression: !Sub 'cron(0 ${StopHour} ? * MON-FRI *)'
+      ScheduleExpressionTimezone: !Ref ScheduleTimezone
+      FlexibleTimeWindow: {Mode: 'OFF'}
+      Target:
+        Arn: 'arn:aws:scheduler:::aws-sdk:ec2:stopInstances'
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"InstanceIds":["${Server}"]}'
+
+  # ------------------------------------------------------------------ optional: budget alert (the first two budgets in an account are free)
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: HasBudgetEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub '${ProjectName}-monthly'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: {Amount: !Ref BudgetLimitUsd, Unit: USD}
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetEmail}]
+        - Notification: {NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetEmail}]
+
+Outputs:
+  SiteUrl:
+    Value: !Sub 'https://${Distribution.DomainName}'
+  UiBucketName:
+    Value: !Ref UiBucket
+  DataBucketName:
+    Value: !Ref DataBucket
+  CredentialsBucketName:
+    Value: !Ref CredsBucket
+  ControlFunctionName:
+    Value: !Ref ControlFunction
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  InstanceId:
+    Condition: PowerOn
+    Value: !Ref Server
+  PowerFunctionName:
+    Description: Register this with the Control Center (python deploy/cc.py register in the control-center project).
+    Value: !Ref PowerFunction
+  DistributionId:
+    Value: !Ref Distribution
