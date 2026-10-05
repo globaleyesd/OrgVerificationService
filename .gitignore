@@ -22,3 +22,6 @@ __pycache__/
 
 # Addresses, passwords and resource names for this machine only
 ACCESS.local.md
+
+# Security remediation notes for this machine only
+remediation-list.md
