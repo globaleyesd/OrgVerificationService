@@ -394,6 +394,7 @@ Resources:
   ServerRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/project-role-boundary'   # see deploy/README.md
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: 'sts:AssumeRole'}]
@@ -536,6 +537,7 @@ Resources:
   ControlRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/project-role-boundary'   # see deploy/README.md
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
@@ -703,6 +705,7 @@ Resources:
   PowerRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/project-role-boundary'   # see deploy/README.md
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
@@ -872,6 +875,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: ScheduleOn
     Properties:
+      PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/project-role-boundary'   # see deploy/README.md
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: scheduler.amazonaws.com}, Action: 'sts:AssumeRole'}]

@@ -33,7 +33,7 @@ Rough monthly infrastructure bill in us-east-1 (check current prices): **about $
 
 ## One-time setup
 1. Install: Python 3.12, AWS CLI v2, Docker (with buildx), VS Code. Recommended extensions are listed in `.vscode/extensions.json` (AWS Toolkit, cfn-lint, Docker, YAML).
-2. **AWS access.** Use a dedicated least-privilege deploy role or IAM Identity Center login rather than root keys. It needs: CloudFormation, EC2/VPC, IAM roles, S3, CloudFront, ECR, SSM (`send-command`, `get-parameter`), Budgets and Scheduler. Choose one:
+2. **AWS access.** Use a dedicated least-privilege deploy role or IAM Identity Center login rather than root keys. It needs: CloudFormation, EC2/VPC, IAM roles, S3, CloudFront, ECR, SSM (`send-command`, `get-parameter`), Budgets and Scheduler. **Before the first deploy an administrator creates the managed policy `project-role-boundary`** (the most any project role may ever do: its own buckets, server, stack and functions). Every role in the stack carries it as its permissions boundary, and the deploy login may create or change roles only with that boundary, so a deploy key can never be turned into an administrator. Choose one:
    - Sign in with the AWS Toolkit or `aws configure sso`, then `set AWS_PROFILE=...` (or put `profile:` in `secrets.local.yaml`).
    - Or put keys in `secrets.local.yaml`. They are passed to the AWS and Docker commands through their environment only, never written to disk or printed, and never sent to AWS by this project.
 3. Copy `config.local.example.yaml` to `config.local.yaml` and set your display name and colours. It is git-ignored.
