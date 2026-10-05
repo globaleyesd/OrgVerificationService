@@ -24,7 +24,7 @@ from .auth import DEMO_USERS, BadLogin, DemoLoginDenied, DemoUsersMissing, Login
 from .config import ConfigError, load_config
 from .costs import RangeError, estimate, parse_range
 from .credstore import CredentialStoreError, make_store
-from .gate import OFFLINE_MESSAGE, blocked_when_off
+from .gate import OFFLINE_MESSAGE, blocked_when_off, from_our_cdn
 from .ingest import IngestError, ingest_bytes, ingest_text
 from .llm import LlmError, LlmNotConfigured, use_stored_key
 from .pages import CSP, PAGES, with_versions
@@ -74,8 +74,13 @@ api = APIRouter(prefix="/api")
 
 
 # ------------------------------------------------------------ middleware
+ORIGIN_SECRET = os.environ.get("APP_ORIGIN_SECRET", "")
+
+
 @app.middleware("http")
 async def gate_and_headers(request: Request, call_next):
+    if not from_our_cdn(request.url.path, request.headers.get("x-origin-verify"), ORIGIN_SECRET):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
     if SWITCH_LOCAL and blocked_when_off(request.url.path) and not switch.is_on():
         resp = JSONResponse({"detail": OFFLINE_MESSAGE, "offline": True}, status_code=503)
     else:

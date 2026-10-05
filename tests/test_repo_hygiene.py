@@ -131,7 +131,9 @@ class TemplateSecurityTests(unittest.TestCase):
         self.assertEqual(p["CreditSpecification"]["CPUCredits"], "standard")
 
     def test_no_secret_parameters_and_no_wildcard_allow_principals(self):
-        self.assertFalse([k for k, v in self.t["Parameters"].items() if v.get("NoEcho")])
+        # The only hidden parameter: the header CloudFront shows the server. It opens nothing; it only proves a request
+        # came through this distribution (see "What is locked down" in deploy/README.md).
+        self.assertEqual([k for k, v in self.t["Parameters"].items() if v.get("NoEcho")], ["OriginVerifySecret"])
         for name in ("UiBucketPolicy", "DataBucketPolicy", "CredsBucketPolicy"):
             for st in self.res[name]["Properties"]["PolicyDocument"]["Statement"]:
                 if st.get("Principal") == "*":

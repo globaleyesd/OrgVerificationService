@@ -1,5 +1,7 @@
 import unittest
 
+from app.gate import from_our_cdn
+
 from app.gate import ALWAYS_ALLOWED, blocked_when_off
 
 
@@ -23,6 +25,20 @@ class GateTests(unittest.TestCase):
     def test_static_page_is_not_gated(self):
         for p in ("/", "/index.html", "/favicon.ico", "/apiary"):
             self.assertFalse(blocked_when_off(p), p)
+
+
+
+class OriginHeaderTests(unittest.TestCase):
+    def test_without_a_secret_everything_passes(self):
+        self.assertTrue(from_our_cdn("/api/ask", None, ""))
+
+    def test_requests_without_cloudfronts_header_are_refused(self):
+        s = "x" * 43
+        self.assertTrue(from_our_cdn("/api/ask", s, s))
+        for bad in (None, "", "wrong", s + "x"):
+            self.assertFalse(from_our_cdn("/api/ask", bad, s))
+            self.assertFalse(from_our_cdn("/", bad, s))
+        self.assertTrue(from_our_cdn("/api/health", None, s))
 
 
 if __name__ == "__main__":

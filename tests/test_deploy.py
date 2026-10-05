@@ -50,6 +50,24 @@ class UploadSafetyTests(unittest.TestCase):
         d.check_deployable(c)
 
 
+class OriginSecretTests(unittest.TestCase):
+    def test_the_origin_secret_is_a_parameter_but_never_printed(self):
+        import contextlib
+        import io
+        params = d.stack_parameters(Config(), {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})
+        cmd = d.cmd_stack(Config(), params)
+        self.assertIn("OriginVerifySecret=" + "s" * 43, cmd)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            d.Runner({}, dry_run=True).run(cmd)
+        self.assertNotIn("s" * 43, out.getvalue())
+        self.assertIn("OriginVerifySecret=****", out.getvalue())
+
+    def test_it_is_required(self):
+        with self.assertRaises(d.DeployError):
+            d.stack_parameters(Config(), {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1"})
+
+
 class BranchTests(unittest.TestCase):
     def test_aws_changes_only_from_the_prod_branch(self):
         for step in ("all", "stack", "image", "ui", "config", "update"):
@@ -78,7 +96,7 @@ class BranchTests(unittest.TestCase):
 class CommandTests(unittest.TestCase):
     def test_aws_keys_never_appear_in_any_command(self):
         c = cfg_with_keys()
-        params = d.stack_parameters(c, {"AmiId": "ami-123", "CloudFrontPrefixListId": "pl-123"})
+        params = d.stack_parameters(c, {"AmiId": "ami-123", "CloudFrontPrefixListId": "pl-123", "OriginVerifySecret": "s" * 43})
         cmds = [d.cmd_stack(c, params), d.cmd_outputs(c), d.cmd_ecr_password("us-east-1"), d.cmd_docker_login("reg"),
                 d.cmd_build_push("repo", "latest"), d.cmd_sync_ui("b"), d.cmd_upload_config("b", "config.yaml"),
                 d.cmd_update_server("i-1"), d.cmd_lookup_ami(), d.cmd_lookup_prefix_list()]
@@ -114,19 +132,19 @@ class CommandTests(unittest.TestCase):
 
     def test_bedrock_permission_only_when_chosen(self):
         c = Config()
-        extra = {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1"}
+        extra = {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43}
         self.assertEqual(d.stack_parameters(c, extra)["AllowBedrock"], "false")
         c.llm.provider = "bedrock"
         self.assertEqual(d.stack_parameters(c, extra)["AllowBedrock"], "true")
 
     def test_lockout_settings_reach_the_control_function(self):
         c = Config(); c.service_switch.max_failed_attempts = 3; c.service_switch.lockout_minutes = 20
-        p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1"})
+        p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})
         self.assertEqual((p["SwitchMaxFailedAttempts"], p["SwitchLockoutMinutes"]), ("3", "20"))
 
     def test_schedule_and_cost_settings_flow_into_the_stack(self):
         c = Config(); c.deployment.schedule.enabled = True; c.deployment.instance_type = "t4g.micro"
-        p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1"})
+        p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})
         self.assertEqual((p["ScheduleEnabled"], p["InstanceType"]), ("true", "t4g.micro"))
 
 

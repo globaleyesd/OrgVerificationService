@@ -41,6 +41,11 @@ Parameters:
   ImageTag:
     Type: String
     Default: latest
+  OriginVerifySecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: CloudFront sends it to the server as X-Origin-Verify; the server refuses requests without it, so nothing can reach it around this distribution. Generated once by deploy/deploy.py and kept in deploy/params.local.json.
   BudgetLimitUsd:
     Type: Number
     Default: 40
@@ -340,6 +345,7 @@ Resources:
                 - 'ec2-${Dashed}.${Suffix}'
                 - Dashed: !Join ['-', !Split ['.', !Ref ServerIp]]
                   Suffix: !If [IsUsEast1, 'compute-1.amazonaws.com', !Sub '${AWS::Region}.compute.amazonaws.com']
+              OriginCustomHeaders: [{HeaderName: X-Origin-Verify, HeaderValue: !Ref OriginVerifySecret}]
               CustomOriginConfig:
                 OriginProtocolPolicy: http-only   # see "Known gaps" in deploy/README.md: CloudFront to server is not encrypted
                 HTTPPort: 80
@@ -472,6 +478,8 @@ Resources:
           echo "CREDS_BUCKET=${CredsBucket}" >> .env
           echo "DATA_BUCKET=${DataBucket}" >> .env
           echo "AWS_REGION_NAME=${AWS::Region}" >> .env
+          echo "ORIGIN_SECRET=${OriginVerifySecret}" >> .env
+          chmod 600 .env
           aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
           docker compose -f docker-compose.aws.yml --env-file .env pull
           # First start of a new server (for example coming back from zero): restore the latest database backup BEFORE

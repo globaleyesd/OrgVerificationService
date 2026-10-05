@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import shlex
 import subprocess
 import sys
@@ -78,10 +79,10 @@ def stack_parameters(cfg: Config, extra: dict) -> dict:
         "SwitchMaxFailedAttempts": str(cfg.service_switch.max_failed_attempts),
         "SwitchLockoutMinutes": str(max(1, round(cfg.service_switch.lockout_minutes))),
     }
-    for key in ("AmiId", "CloudFrontPrefixListId", "BudgetEmail", "ImageTag"):
+    for key in ("AmiId", "CloudFrontPrefixListId", "BudgetEmail", "ImageTag", "OriginVerifySecret"):
         if extra.get(key):
             p[key] = extra[key]
-    missing = [k for k in ("AmiId", "CloudFrontPrefixListId") if k not in p]
+    missing = [k for k in ("AmiId", "CloudFrontPrefixListId", "OriginVerifySecret") if k not in p]
     if missing:
         raise DeployError("Missing stack parameter(s): " + ", ".join(missing))
     return p
@@ -193,12 +194,23 @@ def aws_env(cfg: Config) -> dict:
     return env
 
 
+SECRET_PARAMETERS = ("OriginVerifySecret",)
+
+
+def redact(arg: str) -> str:
+    """Commands are printed; secret stack parameters never are."""
+    for k in SECRET_PARAMETERS:
+        if arg.startswith(k + "="):
+            return k + "=****"
+    return arg
+
+
 class Runner:
     def __init__(self, env: dict, dry_run: bool):
         self.env, self.dry = env, dry_run
 
     def run(self, cmd: list[str], *, capture=False, stdin_text: str | None = None) -> str:
-        print("$ " + " ".join(shlex.quote(c) for c in cmd))
+        print("$ " + " ".join(shlex.quote(redact(c)) for c in cmd))
         if self.dry:
             return "<dry-run>"
         r = subprocess.run(cmd, env=self.env, input=stdin_text, text=True, capture_output=capture)
@@ -230,6 +242,8 @@ def resolve_extra(runner: Runner, refresh_ami: bool) -> dict:
         extra["AmiId"] = runner.run(cmd_lookup_ami(), capture=True); changed = True
     if not extra.get("CloudFrontPrefixListId"):
         extra["CloudFrontPrefixListId"] = runner.run(cmd_lookup_prefix_list(), capture=True); changed = True
+    if not extra.get("OriginVerifySecret"):
+        extra["OriginVerifySecret"] = secrets.token_urlsafe(32); changed = True   # made here once, kept in params.local.json
     if changed and not runner.dry:
         save_params_file(extra)
     return extra
