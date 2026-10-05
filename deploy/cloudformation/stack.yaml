@@ -664,6 +664,18 @@ Resources:
                 Action: ['cloudfront:GetDistribution', 'cloudfront:GetDistributionConfig', 'cloudfront:UpdateDistribution',
                          'cloudfront:TagResource', 'cloudfront:ListTagsForResource']
                 Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+              - Sid: ReadWhatTheDistributionRefersTo   # CloudFormation re-reads these while it repoints the distribution
+                Effect: Allow
+                Action: ['cloudfront:Get*', 'cloudfront:Describe*', 'cloudfront:List*']
+                Resource: '*'
+              - Sid: ReadTheStatusFunctionsAddress
+                Effect: Allow
+                Action: ['lambda:GetFunction', 'lambda:GetFunctionConfiguration', 'lambda:GetFunctionUrlConfig', 'lambda:GetPolicy']
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-*'
+              - Sid: ReadBucketSettingsNotFiles   # bucket-level reads only (the ARNs have no /*): no document is readable
+                Effect: Allow
+                Action: 's3:Get*'
+                Resource: [!GetAtt UiBucket.Arn, !GetAtt DataBucket.Arn]
               - !If
                 - ScheduleOn
                 - Sid: WorkingHoursSchedules
