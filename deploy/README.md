@@ -95,7 +95,8 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 - **Going to zero:** the adapter runs `/opt/app/backup.sh` on the server (a stopped server is started for it), which dumps
   the database to `s3://<documents bucket>/backups/` (a dated copy and `db-latest.sql.gz`). Only if that succeeds does it
   set the stack parameter `Power=zero`, which deletes the server, its disk, its Elastic IP and the working-hours schedules.
-  `/api/*` is then routed to the status function, which answers `503 Service offline`, and the page says the project is at zero.
+  The site's CloudFront distribution is disabled at the same time, so **nothing at the site address answers** (no page,
+  no API, no status): only the Control Center is reachable. Turn on enables it again.
 - **Coming back:** `Power=on` recreates them. On its first start the new server restores `db-latest.sql.gz` **before** the
   app starts, so the app never creates empty tables first. Documents, accounts (credentials bucket), the page and the image
   were never deleted.

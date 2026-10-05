@@ -315,6 +315,13 @@ class PowerLevelTemplateTests(TemplateSecurityTests):
                 self.assertTrue(all("${ProjectName}-*" in r["!Sub"] for r in x["Resource"]))
 
 
+class ZeroMeansUnreachableTests(TemplateSecurityTests):
+    def test_at_zero_the_site_answers_nothing(self):
+        # Stopped means stopped: no page, no API, no status at the site address. Only the Control Center answers.
+        cfg = self.res["Distribution"]["Properties"]["DistributionConfig"]
+        self.assertEqual(cfg["Enabled"], {"!If": ["PowerOn", True, False]})
+
+
 class PageRoutingTests(TemplateSecurityTests):
     def test_template_csp_matches_the_app_csp(self):
         from app.pages import CSP

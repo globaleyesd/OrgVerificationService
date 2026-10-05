@@ -74,8 +74,9 @@ Parameters:
     AllowedValues: ['on', 'zero']
     Description: >
       Set by the Control Center's power adapter, not by hand. 'zero' removes the server, its disk and its Elastic IP
-      (COST - nothing billed by the hour); the database is backed up to the documents bucket first and restored when
-      it comes back 'on'. Buckets, the page and the image stay.
+      (COST - nothing billed by the hour) and disables the site's distribution, so nothing at the site address
+      answers; the database is backed up to the documents bucket first and restored when it comes back 'on'.
+      Buckets, the page files and the image stay.
 
 Conditions:
   HasBudgetEmail: !Not [!Equals [!Ref BudgetEmail, '']]
@@ -303,7 +304,7 @@ Resources:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Enabled: true
+        Enabled: !If [PowerOn, true, false]   # at zero the site answers nothing at all; only the Control Center is reachable
         Comment: !Sub '${ProjectName} page and API'
         DefaultRootObject: index.html
         HttpVersion: http2and3
