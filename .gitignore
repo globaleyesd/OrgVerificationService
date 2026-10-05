@@ -19,3 +19,6 @@ __pycache__/
 .pytest_cache/
 .pre-commit-local.yaml
 *.log
+
+# Addresses, passwords and resource names for this machine only
+ACCESS.local.md
