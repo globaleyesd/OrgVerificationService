@@ -18,11 +18,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .access import can_ask, can_view_costs
+from .access import can_ask
 from .answering import AnswerError, answer_question, suggest_question
 from .auth import DEMO_USERS, BadLogin, DemoLoginDenied, DemoUsersMissing, LoginLocked, UserStore, demo_login, load_signer
 from .config import ConfigError, load_config
-from .costs import RangeError, estimate, parse_range
 from .credstore import CredentialStoreError, make_store
 from .gate import OFFLINE_MESSAGE, blocked_when_off, from_our_cdn
 from .ingest import IngestError, ingest_bytes, ingest_text
@@ -180,17 +179,6 @@ class LevelBody(BaseModel):
     level: str = Field(..., max_length=40)
 
 
-class CostBody(BaseModel):
-    start: str = Field(..., max_length=64)
-    end: str = Field(..., max_length=64)
-
-
-class CostServicesBody(BaseModel):
-    days: int = Field(30, ge=1, le=366)            # the last N days, today included
-    start: str | None = Field(None, max_length=64)   # or an exact range (both set): ISO date-times
-    end: str | None = Field(None, max_length=64)
-
-
 def _minutes(seconds_left: float) -> int:
     return math.ceil(seconds_left / 60)
 
@@ -292,7 +280,6 @@ def public_settings(request: Request):
         "max_file_mb": cfg.ingestion.max_file_mb,
         "speech_mode": cfg.speech.mode,
         "user": user_payload(user),
-        "can_view_costs": can_view_costs(role, cfg.clearance.levels),
         "can_review": can_relabel(role or "", cfg.clearance.levels),
         "ui": {"demo_mode": cfg.ui.demo_mode, "demo_login": cfg.ui.demo_mode, "can_ask": can_ask(role, cfg.ui), "allow_mock": cfg.ui.allow_mock},
         # the accounts the sign-in screen offers in demo mode (names and roles only; they need no password there)
@@ -418,105 +405,6 @@ def set_level(body: LevelBody, request: Request):
         raise HTTPException(status_code=404, detail="No such document")
     log.info("document %s relabelled to %s", body.id, body.level)
     return {"id": body.id, "level": body.level}
-
-
-def _service_status(documents: list) -> dict:
-    """What is running right now, checked live with short timeouts. Never raises."""
-    import json as _json
-    import urllib.request
-    from .config import has_llm_key
-    st = {"server": {"state": "running", "detail": "Answering requests now"}}
-    try:
-        from .db.conn import connect
-        conn = connect(cfg)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-        finally:
-            conn.close()
-        st["database"] = {"state": "running", "detail": "Reachable; included in the server's cost"}
-    except Exception:
-        st["database"] = {"state": "stopped", "detail": "Not reachable"}
-    used_locally = cfg.llm.provider == "local"
-    try:
-        with urllib.request.urlopen(cfg.llm.local_url.rstrip("/") + "/api/ps", timeout=2) as r:
-            loaded = _json.loads(r.read()).get("models") or []
-        if loaded:
-            m = loaded[0]
-            gpu = round(100 * (m.get("size_vram") or 0) / (m.get("size") or 1))
-            st["local_ai"] = {"state": "running", "detail": f"{m.get('name', 'model')} loaded, {gpu}% on the GPU; no fee per question"}
-        else:
-            st["local_ai"] = {"state": "idle", "detail": "Up; no model loaded (it loads on the next question)" if used_locally
-                              else f"Up but not used (llm.provider is {cfg.llm.provider})"}
-    except Exception:
-        st["local_ai"] = {"state": "stopped" if used_locally else "off", "detail": "Not reachable" if used_locally else "Not in use"}
-    if cfg.llm.provider == "bedrock":
-        st["hosted_ai"] = {"state": "running", "detail": "Amazon Bedrock; charged per question"}
-    elif cfg.llm.provider == "anthropic" and has_llm_key(cfg):
-        st["hosted_ai"] = {"state": "running", "detail": "Anthropic API key set; charged per question"}
-    else:
-        st["hosted_ai"] = {"state": "off", "detail": f"Not in use (llm.provider is {cfg.llm.provider})"}
-    mb = sum(size for _, size in documents) / 1e6
-    st["storage"] = {"state": "running", "detail": f"{len(documents)} file{'' if len(documents) == 1 else 's'}, {mb:.1f} MB stored"}
-    for key in ("disk", "public_ip"):
-        st[key] = ({"state": "aws_only", "detail": "Exists only on AWS, not on this machine: the amount is what it would cost there"}
-                   if SWITCH_LOCAL else {"state": "running", "detail": "Allocated; billed every hour, even while the server is stopped"})
-    return st
-
-
-@api.post("/costs/services")
-def costs_services(body: CostServicesBody, request: Request):
-    """Cost by service, day by day, for the last `days` days or an exact start/end, with what is running now. Super only."""
-    if not can_view_costs(current_role(request), cfg.clearance.levels):
-        raise HTTPException(status_code=403, detail="Cost details are not available for this account")
-    import datetime as _dt
-    from .cost_services import by_service, read_meters
-    if body.start or body.end:
-        try:
-            start, end = parse_range(body.start or "", body.end or "", cfg.costs.max_range_days)
-        except RangeError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    else:
-        end = _dt.datetime.now(_dt.timezone.utc)
-        start = (end - _dt.timedelta(days=min(body.days, cfg.costs.max_range_days) - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    try:
-        from .db.conn import connect
-        conn = connect(cfg)
-        try:
-            meters = read_meters(conn, start, end)
-        finally:
-            conn.close()
-    except Exception as e:
-        log.warning("cost meters unavailable: %s", type(e).__name__)
-        raise HTTPException(status_code=503, detail="Usage records are not available right now")
-    out = by_service(meters, start, end, rates=cfg.costs.rates, llm_prices=cfg.costs.llm_prices_per_mtok,
-                     root_volume_gb=cfg.deployment.root_volume_gb, heartbeat_seconds=cfg.costs.heartbeat_seconds,
-                     status=_service_status(meters.documents))
-    out["mode"] = "local" if SWITCH_LOCAL else "aws"
-    return out
-
-
-@api.post("/costs/estimate")
-def costs_estimate(body: CostBody, request: Request):
-    """Estimated cost between two times. Contract in docs/SERVICE_SWITCH_AND_COSTS.md."""
-    if not can_view_costs(current_role(request), cfg.clearance.levels):
-        raise HTTPException(status_code=403, detail="Cost details are not available for this account")
-    try:
-        start, end = parse_range(body.start, body.end, cfg.costs.max_range_days)
-    except RangeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    try:
-        from .db.conn import connect
-        from .usage import read_usage
-        conn = connect(cfg)
-        try:
-            usage = read_usage(conn, start, end, cfg.costs.heartbeat_seconds)
-        finally:
-            conn.close()
-    except Exception as e:   # database unreachable, tables missing, ...
-        log.warning("cost meters unavailable: %s", type(e).__name__)
-        raise HTTPException(status_code=503, detail="Usage records are not available right now")
-    return estimate(start, end, usage, cfg.costs.rates, cfg.costs.llm_prices_per_mtok, cfg.deployment.root_volume_gb)
 
 
 app.include_router(api)

@@ -14,7 +14,6 @@ Ask questions across your team's documents and get answers where every claim lin
 - Two pages with their own addresses: `/add` (**Add knowledge**, a big drag-and-drop box, any signed-in user) and `/ask` (**Ask**, chat with a highlighted, collapsible source panel, role-checked)
 - Sign-in with two demo accounts, **Eileen** (Super) and **AllMinusEileen** (Employee), stored in a protected S3 bucket on AWS. In demo mode you just click a user; outside it, a password form
 - Password-protected on/off switch: locally it makes every API answer "Service offline"; on AWS it really stops the server (no compute charge) and starts it again
-- Live cost dashboard: what each running service costs, day by day, for any period (last 30 days by default)
 - Optional microphone input
 - Configurable, Dockerised, and designed to run cheaply on one small AWS server with the page hosted on S3 + CloudFront
 
@@ -47,7 +46,7 @@ python -m unittest discover -s tests -t .
 - [docs/COMMANDS.md](docs/COMMANDS.md): every command to run locally, deploy to AWS, work on the server and tear down
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): every setting, with quick recipes
 - [docs/UI.md](docs/UI.md): the pages, who can use them, the source panel and the API contract
-- [docs/SERVICE_SWITCH_AND_COSTS.md](docs/SERVICE_SWITCH_AND_COSTS.md): the switch, the credentials folder, the cost dashboard
+- [docs/SERVICE_SWITCH_AND_COSTS.md](docs/SERVICE_SWITCH_AND_COSTS.md): the switch, the credentials folder, how costs are estimated
 - [deploy/README.md](deploy/README.md): deploying to AWS from VS Code, what is locked down, known gaps
 
 ## Credentials

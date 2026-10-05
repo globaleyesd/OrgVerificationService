@@ -34,7 +34,6 @@
 - Sign out, click **AllMinusEileen**, ask the same question: fewer sources, no level tags, and "some sources were not available at your access level"
 - `/add`: type a note or drop a file (no sign-in needed). It starts at the **top** level, so AllMinusEileen cannot see it yet
 - `/review` (Eileen only): choose who can read each document. Mark your new note "Employee and above", then ask AllMinusEileen about it
-- **Costs** (Eileen only): shows the estimate for any time range, now including real AI usage
 
 ## Check it automatically
 - With the stack running, the service on, the demo users created and the samples loaded: `python scripts/smoke_local.py`

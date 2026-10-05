@@ -29,7 +29,7 @@ Browser ──https──> CloudFront ──/ (page)──────> private 
 | **Switch = stop the server** (a tiny Lambda behind CloudFront) | Leaving the server running while "off" | Off really stops the compute charge. The function stays inside the free tier |
 | Claude Haiku for answers (`config.aws.local.yaml`) | A larger model | About half a cent per question, billed only when someone asks |
 
-Rough monthly infrastructure bill in us-east-1 (check current prices): **about $17-18 always-on, about $9 with the working-hours schedule, and about $5-6 while the switch has the server stopped**, before AI usage. That is the server (about $12 always-on), the Elastic IP (about $3.65, billed even when stopped), disk (about $1.60) and small items. The in-app **Costs** button shows the live estimate.
+Rough monthly infrastructure bill in us-east-1 (check current prices): **about $17-18 always-on, about $9 with the working-hours schedule, and about $5-6 while the switch has the server stopped**, before AI usage. That is the server (about $12 always-on), the Elastic IP (about $3.65, billed even when stopped), disk (about $1.60) and small items. The Control Center card shows the live projection.
 
 ## One-time setup
 1. Install: Python 3.12, AWS CLI v2, Docker (with buildx), VS Code. Recommended extensions are listed in `.vscode/extensions.json` (AWS Toolkit, cfn-lint, Docker, YAML).

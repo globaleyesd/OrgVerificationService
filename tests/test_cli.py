@@ -169,7 +169,7 @@ class DocumentCommandTests(CliTests):
 
 class DocsMatchCliTests(unittest.TestCase):
     def test_every_cli_command_in_the_docs_exists(self):
-        real = {"set-switch-password", "create-demo-users", "set-user-password", "list-users", "ingest", "list-documents", "set-document-level", "reindex", "service", "set-llm-key"}
+        real = {"set-switch-password", "create-demo-users", "set-user-password", "list-users", "ingest", "list-documents", "set-document-level", "reindex", "service", "set-llm-key", "ai-costs"}
         used = set()
         for f in list((ROOT / "docs").glob("*.md")) + [ROOT / "README.md", ROOT / "deploy" / "README.md"]:
             used |= set(re.findall(r"app\.cli ([a-z-]+)", f.read_text()))

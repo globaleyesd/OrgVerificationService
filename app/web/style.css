@@ -26,7 +26,7 @@
   /* ---------- offline screen ---------- */
   #offline{display:none;flex:1;align-items:center;justify-content:center;padding:24px}
   body.offline #offline{display:flex}
-  body.offline main, body.noaccess main, body.offline #costbtn{display:none !important}
+  body.offline main, body.noaccess main{display:none !important}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;max-width:420px;width:100%}
   .card h2{margin:0 0 6px;font-size:1.3rem}
   .card p{margin:0 0 16px;color:var(--muted)}
@@ -39,66 +39,6 @@
   dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);padding:22px;width:min(600px,94vw)}
   dialog::backdrop{background:rgba(0,0,0,.4)}
   dialog h2{margin:0 0 12px;font-size:1.15rem}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
-  .row .field{flex:1;min-width:180px;margin:0}
-  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-  .presets button{padding:6px 10px;font-size:.88rem}
-  /* ---------- cost dashboard ---------- */
-  dialog.wide{width:min(980px,96vw);max-height:92vh;overflow:auto}
-  .dlghead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px}
-  .dlghead h2{margin:0}
-  .rangebar{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;padding:12px 0 6px;border-bottom:1px solid var(--line);margin-bottom:12px}
-  .rangebar .grow{min-width:280px;margin:0}
-  .rangebar .custom{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
-  .rangebar .custom .field{margin:0}
-  input[type=date]{font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
-  #crange{width:100%;accent-color:var(--accent);margin:6px 0 0}
-  #crange.unset{opacity:.45}
-  .ticks{display:flex;justify-content:space-between;color:var(--muted);font-size:.75rem;padding:0 2px;font-variant-numeric:tabular-nums}
-  #costdash{--surf:var(--panel);--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#898781;transition:opacity .15s}
-  #costdash.loading{opacity:.5}
-  .costhead .kicker{color:var(--muted);font-size:.9rem}
-  .costhead .hero{font-size:3.2rem;font-weight:650;line-height:1.1;letter-spacing:-.01em}
-  .costhead .note{margin:8px 0 0;padding:8px 10px;border-left:3px solid var(--line);background:var(--bg);font-size:.88rem}
-  #costdash h3{font-size:.95rem;margin:18px 0 8px}
-  .svclist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
-  .svclist li{display:grid;grid-template-columns:1fr auto;gap:2px 16px;padding:10px 0;border-top:1px solid var(--line)}
-  .svcname{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .svclist .amt{grid-row:span 2;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;font-size:1.05rem}
-  .svclist .amt small{display:block;color:var(--muted);font-weight:400;font-size:.78rem}
-  .svclist .fine{grid-column:1}
-  .track{grid-column:1 / -1;height:8px;background:var(--bg);border-radius:4px;margin-top:4px}
-  .fill{height:8px;width:var(--w);border-radius:0 4px 4px 0;background:var(--c)}
-  .key{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--c);flex:none}
-  .s1{--c:var(--s1)} .s2{--c:var(--s2)} .s3{--c:var(--s3)} .s4{--c:var(--s4)} .s5{--c:var(--s5)} .s6{--c:var(--s6)} .s7{--c:var(--s7)}
-  .state{display:inline-flex;align-items:center;gap:3px;font-size:.78rem;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--text);background:var(--bg)}
-  .state.small{padding:0 4px;border:0;background:transparent}
-  .state .ico{font-size:.8rem;line-height:1}
-  .st-running .ico{color:#0ca30c} .st-idle .ico{color:#b77d00} .st-stopped .ico{color:#d03b3b} .st-aws_only .ico,.st-off .ico{color:var(--muted)}
-  .freeline{margin-top:8px}
-  .chart .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.85rem;color:var(--text);margin-bottom:6px}
-  .chart .legend .item{display:inline-flex;align-items:center;gap:6px}
-  .plot{position:relative}
-  .costsvg{width:100%;height:auto;display:block;overflow:visible}
-  .costsvg:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-  .costsvg .grid{stroke:#e1e0d9;stroke-width:1} .costsvg .base{stroke:#c3c2b7;stroke-width:1}
-  .costsvg .tick{fill:#6b6a64;font:11px system-ui,sans-serif;font-variant-numeric:tabular-nums}
-  .costsvg .seg{fill:var(--c)}
-  .costsvg .hover{fill:color-mix(in srgb,var(--text) 6%,transparent)}
-  .tip{position:absolute;top:0;left:var(--x);transform:translateX(12px);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;
-       box-shadow:0 4px 14px rgba(0,0,0,.14);font-size:.82rem;min-width:170px;pointer-events:none;z-index:2}
-  .tip.left{transform:translateX(calc(-100% - 12px))}
-  .tiptitle{color:var(--muted)} .tiptotal{font-weight:700;font-size:1.05rem;margin-bottom:4px}
-  .tiprow{display:flex;align-items:center;gap:6px;white-space:nowrap}
-  .tiprow .line{display:inline-block;width:12px;height:3px;border-radius:2px;background:var(--c)}
-  .tableview{margin-top:12px} .tableview summary{cursor:pointer;color:var(--accent)}
-  table.costs th{text-align:left;color:var(--muted);font-weight:600;font-size:.82rem;padding:6px 4px;border-bottom:1px solid var(--line)}
-  table.costs th.amt{text-align:right}
-  table.costs{width:100%;border-collapse:collapse;margin:8px 0}
-  table.costs td{padding:7px 4px;border-bottom:1px solid var(--line);vertical-align:top}
-  table.costs td.amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-  table.costs td small{display:block;color:var(--muted)}
-  table.costs tr.total td{font-weight:700;border-bottom:0;font-size:1.1rem}
   .fine{color:var(--muted);font-size:.85rem}
   .dlgbtns{display:flex;gap:10px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
 

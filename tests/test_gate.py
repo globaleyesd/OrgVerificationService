@@ -7,7 +7,7 @@ from app.gate import ALWAYS_ALLOWED, blocked_when_off
 
 class GateTests(unittest.TestCase):
     def test_real_endpoints_blocked_when_off(self):
-        for p in ("/api/ask", "/api/upload", "/api/settings/public", "/api/costs/estimate", "/api/anything-new"):
+        for p in ("/api/ask", "/api/upload", "/api/settings/public", "/api/anything-new"):
             self.assertTrue(blocked_when_off(p), p)
 
     def test_only_health_status_and_switch_are_open(self):

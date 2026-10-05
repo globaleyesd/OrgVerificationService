@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.access import can_ask, can_view_costs
+from app.access import can_ask
 from app.config import ConfigError, UI, load_config
 from app.pages import CSP, PAGES
 
@@ -29,11 +29,6 @@ class AskAccessTests(unittest.TestCase):
 
     def test_empty_ask_roles_means_nobody(self):
         self.assertFalse(can_ask("super", UI(demo_mode=False, allow_mock=False, ask_roles=[])))
-
-    def test_costs_top_level_only(self):
-        self.assertTrue(can_view_costs("super", LEVELS))
-        self.assertFalse(can_view_costs("employee", LEVELS))
-        self.assertFalse(can_view_costs(None, LEVELS))
 
 
 class ConfigRuleTests(unittest.TestCase):

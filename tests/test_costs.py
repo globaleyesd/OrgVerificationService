@@ -81,60 +81,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ByServiceTests(unittest.TestCase):
-    """The dashboard's daily split by service (app.cost_services)."""
-
-    def run_it(self, meters, days=5, status=None):
-        from app.cost_services import by_service
-        end = NOW
-        start = (end - timedelta(days=days - 1)).replace(hour=0)
-        prices = dict(CFG.costs.llm_prices_per_mtok, **{"qwen3:4b": [0, 0], "claude-x": [3.0, 15.0]})
-        return by_service(meters, start, end, rates=CFG.costs.rates, llm_prices=prices, root_volume_gb=20,
-                          heartbeat_seconds=300, status=status or {"server": {"state": "running", "detail": ""}})
-
-    def meters(self, **kw):
-        from app.cost_services import Meters
-        day = NOW.replace(hour=0)
-        base = dict(beats_by_day={day: 12}, tokens_by_day={}, documents=[], first_record=day)
-        base.update(kw)
-        return Meters(**base)
-
-    def test_days_before_the_project_existed_cost_nothing(self):
-        r = self.run_it(self.meters())
-        self.assertEqual([d["total_usd"] for d in r["daily"][:4]], [0, 0, 0, 0])   # only today has records
-        self.assertGreater(r["daily"][4]["total_usd"], 0)
-        self.assertEqual(r["days"], 5)
-
-    def test_costs_land_on_their_service_and_day(self):
-        day = NOW.replace(hour=0)
-        r = self.run_it(self.meters(tokens_by_day={day: {"claude-x": (1_000_000, 0), "qwen3:4b": (5_000_000, 5_000_000)}}))
-        today = r["daily"][-1]["usd"]
-        self.assertAlmostEqual(today["hosted_ai"], 3.0)
-        self.assertAlmostEqual(today["server"], 1.0 * CFG.costs.rates.instance_hourly_usd)   # 12 beats x 300 s = 1 h
-        self.assertNotIn("local_ai", today)                                                  # priced at zero: no cost
-        self.assertAlmostEqual(r["total_usd"], sum(s["usd"] for s in r["services"]), places=3)
-
-    def test_listed_when_costing_a_cent_or_running(self):
-        status = {"server": {"state": "running", "detail": ""}, "local_ai": {"state": "idle", "detail": "up"},
-                  "hosted_ai": {"state": "off", "detail": ""}, "database": {"state": "running", "detail": ""}}
-        r = self.run_it(self.meters(), status=status)
-        by_key = {s["key"]: s for s in r["services"]}
-        self.assertTrue(by_key["server"]["costing"]); self.assertFalse(by_key["database"]["costing"])
-        self.assertIn("local_ai", by_key); self.assertNotIn("hosted_ai", by_key)          # off and free: not listed
-        self.assertEqual(r["running_now"], 3)
-        self.assertEqual([s["key"] for s in r["series"]], [k for k in ("server", "disk", "public_ip") if k in [s["key"] for s in r["services"] if s["costing"]]])
-        self.assertTrue(r["services"][0]["costing"])                                          # costing services first
-
-    def test_unlisted_ollama_models_are_free_and_raise_no_warning(self):
-        day = NOW.replace(hour=0)
-        r = self.run_it(self.meters(tokens_by_day={day: {"gemma3:4b": (1000, 1000), "mystery-model": (1000, 0)}}))
-        self.assertEqual(r["warnings"], ["No price configured for model 'mystery-model', so its usage is not costed"])
-
-    def test_no_records_yet_means_no_cost(self):
-        r = self.run_it(self.meters(beats_by_day={}, first_record=None))
-        self.assertEqual(r["total_usd"], 0); self.assertIsNone(r["tracking_since"])
-
-
 class AiCostTests(unittest.TestCase):
     def test_hosted_models_are_priced_local_ones_are_free_and_unknown_ones_flagged(self):
         from app.costs import ai_costs

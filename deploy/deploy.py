@@ -310,7 +310,7 @@ ALL_LEVELS = ["running", "stopped", "zero"]
 
 def aws_cost_sheet(cfg: Config) -> dict:
     """Every AWS service this stack is billed for at least a cent a month, with the power levels it is billed at
-    (running / stopped / zero). Priced from config.yaml so it agrees with the in-app cost dashboard."""
+    (running / stopped / zero). Priced from config.yaml so it agrees with the app's own cost meters."""
     r, dpl = cfg.costs.rates, cfg.deployment
     rows = [
         {"name": f"EC2 server ({dpl.instance_type})", "monthly_usd": r.instance_hourly_usd * HOURS_PER_MONTH, "billed_at": ["running"],

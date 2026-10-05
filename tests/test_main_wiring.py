@@ -96,13 +96,13 @@ class MainWiringTests(unittest.TestCase):
     def test_expected_routes_exist(self):
         for key in [("GET", "/api/health"), ("GET", "/api/service/status"), ("POST", "/api/service/on"), ("POST", "/api/service/off"),
                     ("POST", "/api/auth/login"), ("POST", "/api/auth/demo-login"), ("POST", "/api/auth/logout"), ("GET", "/api/auth/me"), ("GET", "/api/settings/public"),
-                    ("POST", "/api/upload"), ("POST", "/api/ask"), ("POST", "/api/costs/estimate"), ("POST", "/api/costs/services"), ("GET", "/api/documents"), ("POST", "/api/documents/level"),
+                    ("POST", "/api/upload"), ("POST", "/api/ask"), ("GET", "/api/documents"), ("POST", "/api/documents/level"),
                     ("GET", "/"), ("GET", "/ask"), ("GET", "/add"), ("GET", "/review")]:
             self.assertIn(key, self.routes, key)
 
     # ---- offline gate ----
     def test_everything_but_the_four_paths_is_offline_while_off(self):
-        for path in ("/api/settings/public", "/api/ask", "/api/upload", "/api/auth/login", "/api/costs/estimate"):
+        for path in ("/api/settings/public", "/api/ask", "/api/upload", "/api/auth/login"):
             r = self.middleware(path)
             self.assertEqual(r.status_code, 503, path)
             self.assertEqual(r.content, {"detail": "Service offline", "offline": True})
@@ -159,10 +159,10 @@ class MainWiringTests(unittest.TestCase):
         cookies = {"session": c["value"]}
         self.assertEqual(self.call("GET", "/api/auth/me", self.req(cookies=cookies))["user"]["display_name"], "Eileen")
         employee = {"session": self.demo("AllMinusEileen").cookies["session"]["value"]}
-        self.assertEqual(self.call("GET", "/api/settings/public", self.req(cookies=employee))["can_view_costs"], False)
+        self.assertEqual(self.call("GET", "/api/settings/public", self.req(cookies=employee))["can_review"], False)
         mark = {"session": self.demo("Mark").cookies["session"]["value"]}
         s = self.call("GET", "/api/settings/public", self.req(cookies=mark))
-        self.assertEqual((s["user"]["display_name"], s["user"]["role"], s["can_view_costs"], s["can_review"]), ("Mark", "super", True, True))
+        self.assertEqual((s["user"]["display_name"], s["user"]["role"], s["can_review"]), ("Mark", "super", True))
         other = {"session": self.demo("AllMinusMark").cookies["session"]["value"]}
         self.assertEqual(self.call("GET", "/api/settings/public", self.req(cookies=other))["user"]["role"], "employee")
         self.assertEqual([u["display_name"] for u in s["demo_users"]], ["Eileen", "AllMinusEileen", "Mark", "AllMinusMark"])
@@ -202,27 +202,15 @@ class MainWiringTests(unittest.TestCase):
         self.assertEqual(resp.deleted[0][0], "session")
 
     # ---- Ask is role-checked, Add is not ----
-    # ---- settings and costs follow the role ----
+    # ---- settings follow the role ----
     def test_settings_reflect_the_signed_in_user(self):
         self.make_users()
         anon = self.call("GET", "/api/settings/public", self.req())
-        self.assertEqual((anon["user"], anon["ui"]["can_ask"], anon["can_view_costs"]), (None, False, False))
+        self.assertEqual((anon["user"], anon["ui"]["can_ask"], anon["can_review"]), (None, False, False))
         eileen = self.call("GET", "/api/settings/public", self.req(cookies=self.login("eileen")[0]))
-        self.assertEqual((eileen["user"]["display_name"], eileen["ui"]["can_ask"], eileen["can_view_costs"]), ("Eileen", True, True))
+        self.assertEqual((eileen["user"]["display_name"], eileen["ui"]["can_ask"], eileen["can_review"]), ("Eileen", True, True))
         other = self.call("GET", "/api/settings/public", self.req(cookies=self.login("allminuseileen")[0]))
-        self.assertEqual((other["ui"]["can_ask"], other["can_view_costs"]), (True, False))
-
-    def test_costs_only_for_the_top_role(self):
-        self.make_users()
-        body = self.body(start="2026-10-01T00:00:00Z", end="2026-10-01T06:00:00Z")
-        self.raises(403, self.call, "POST", "/api/costs/estimate", body, self.req())
-        self.raises(403, self.call, "POST", "/api/costs/estimate", body, self.req(cookies=self.login("allminuseileen")[0]))
-        # top role gets past the role check; with no database here it ends in the 503 "meters unavailable"
-        self.raises(503, self.call, "POST", "/api/costs/estimate", body, self.req(cookies=self.login("eileen")[0]))
-        self.raises(400, self.call, "POST", "/api/costs/estimate", self.body(start="x", end="y"), self.req(cookies=self.login("eileen")[0]))
-        self.raises(403, self.call, "POST", "/api/costs/services", self.body(days=30, start=None, end=None), self.req(cookies=self.login("allminuseileen")[0]))
-        self.raises(400, self.call, "POST", "/api/costs/services", self.body(days=30, start="x", end="y"), self.req(cookies=self.login("eileen")[0]))
-        self.raises(503, self.call, "POST", "/api/costs/services", self.body(days=30, start=None, end=None), self.req(cookies=self.login("eileen")[0]))
+        self.assertEqual((other["ui"]["can_ask"], other["can_review"]), (True, False))
 
     # ---- the real endpoints, with in-memory stand-ins for the database, embedder and AI ----
     def use_services(self, llm=None):
@@ -406,6 +394,20 @@ class MainWiringTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             importlib.import_module("app.main")
         self.assertIn("demo default", str(cm.exception))
+
+
+class CostDashboardIsGoneTests(unittest.TestCase):
+    """The cost dashboard was removed from every screen: costs are watched from the Control Center."""
+
+    def test_no_cost_endpoints_or_screen(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent / "app"
+        main = (root / "main.py").read_text(encoding="utf-8")
+        self.assertNotIn("/costs/", main); self.assertNotIn("can_view_costs", main)
+        self.assertFalse((root / "cost_services.py").exists())
+        js = (root / "web" / "common.js").read_text(encoding="utf-8")
+        for gone in ("costbtn", "costdlg", "costdash", "/costs/", "initCosts", "mockServices"):
+            self.assertNotIn(gone, js)
 
 
 if __name__ == "__main__":

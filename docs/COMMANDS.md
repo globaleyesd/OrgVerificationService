@@ -35,7 +35,7 @@ Run everything from the project folder (the one containing `config.yaml`). The V
   - `python -m app.cli create-demo-users`
   - This writes to the local `creds/` folder, which the container reads too. Or inside Docker: `python scripts/containers.py exec api python -m app.cli create-demo-users`
 - Sign in at `http://localhost:8000/ask` (in demo mode you just click a user; no password to type):
-  - **Eileen** = Super (sees everything and the Costs button)
+  - **Eileen** = Super (sees everything and the Review page)
   - **AllMinusEileen** = Employee (everyone-but-Eileen view)
   - Use Chrome or Firefox locally (Safari rejects secure cookies on plain http://localhost)
 - Preview the screens with fake sample data (no server, no Docker):

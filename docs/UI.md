@@ -11,14 +11,14 @@ The web pages are plain files in `app/web` with no third-party requests, and no 
 | `/review` | **Review documents**: choose who can read each document | **Yes, top role only** |
 | `/signin` | **Sign in**: pick a demo account (or username and password outside demo mode); also how you **switch user** mid-demo | No (it is the sign-in) |
 
-There is no switch between them in the page: people open the address they need. The header has the title (a link to `/`), the signed-in user (for reference) and **Costs** (top role only). Switching user and signing out happen only on the sign-in screen, `/signin`. There is no on/off button: on AWS the Control Center turns projects on and off; locally `python -m app.cli service on|off` does.
+There is no switch between them in the page: people open the address they need. The header has the title (a link to `/`), and the signed-in user (for reference). Switching user and signing out happen only on the sign-in screen, `/signin`. There is no on/off button: on AWS the Control Center turns projects on and off; locally `python -m app.cli service on|off` does.
 
 ## The two demo accounts
 Two accounts complete the demo scenarios. They are created with one command (see [COMMANDS.md](COMMANDS.md)) and stored in the protected credentials store (a private S3 bucket on AWS; the `creds/` folder locally). **In demo mode the sign-in page has no text boxes: you just click the user you want to be.**
 
 | User | Role | What they see |
 |---|---|---|
-| **Eileen** | Super | Everything: all sources, level tags, the diagram, the disagreement scene, the **Costs** button |
+| **Eileen** | Super | Everything: all sources, level tags, the diagram, the disagreement scene, the Review page |
 | **AllMinusEileen** | Employee | One shared account standing for everyone except Eileen: Employee-level sources only, no level tags, no diagram, and a "some sources were not available" notice |
 | **Mark** | Super | Exactly the same as Eileen: a second Super account |
 | **AllMinusMark** | Employee | Exactly the same as AllMinusEileen: a second Employee account |
@@ -62,7 +62,6 @@ A user's **role is their clearance level** (`super` or `employee` by default). C
 | `/ask` page and `POST /api/ask` | Needs sign-in and a role listed in `ui.ask_roles`. Nobody signed in has no role, so no access |
 | `/add` page and `POST /api/upload` | Needs sign-in (any role). No role check beyond that |
 | Every page | Needs sign-in: a page opened without one, or any request answered `401`, goes to `/signin` and comes back afterwards. There is no sign-in prompt on the pages themselves |
-| Costs | Top clearance level only (Eileen) |
 | `/review` page and `/api/documents*` | Needs sign-in and the top role |
 | Everything under `/api` | Needs the service switch to be on |
 
@@ -84,7 +83,7 @@ The checks live on the **server**. The page only reflects what the server says.
 While the service switch is off (or the server is stopped) every page shows **Service offline** and says where to turn it on (the Control Center, locally and on AWS). On AWS, while a server is starting, the page shows "starting, about a minute" and loads by itself; at zero the site address answers nothing at all (its distribution is disabled) until it is turned on from the Control Center. If the page can't reach anything at all (for example a local run with the server down) it just says the server can't be reached. Any request that comes back "offline" while you are using a page sends you here too. Sign-in is also refused while the service is off.
 
 ## Trying the pages with no backend
-Open a page as a plain file with `?mock=1` on the end (for example `app/web/ask.html?mock=1`), or run the server with `ui.allow_mock: true` and use `http://localhost:8000/ask?mock=1`. Answers and cost numbers are fictional and nothing is sent anywhere. On the sign-in card or `/signin`, click any demo account; the choice is remembered for that browser tab so every page agrees. `&state=off` starts on the offline screen.
+Open a page as a plain file with `?mock=1` on the end (for example `app/web/ask.html?mock=1`), or run the server with `ui.allow_mock: true` and use `http://localhost:8000/ask?mock=1`. Answers are fictional and nothing is sent anywhere. On the sign-in card or `/signin`, click any demo account; the choice is remembered for that browser tab so every page agrees. `&state=off` starts on the offline screen.
 
 ## Backend contract (what the pages expect)
 All data routes are under `/api`.
@@ -98,12 +97,11 @@ All data routes are under `/api`.
 | `POST /api/auth/demo-login` | `{username}` gives `{user}` and sets the cookie, **no password**. Only while `ui.demo_mode` is true and only for the two demo accounts: otherwise `403`. `404` if the demo accounts haven't been created |
 | `POST /api/auth/logout` | Clears the cookie |
 | `GET /api/auth/me` | `{user}` (or `{user: null}`) |
-| `GET /api/settings/public` | Non-secret page settings: `branding`, allowed file types, max size, speech mode, `user`, `can_view_costs`, `ui: {demo_mode, demo_login, can_ask, allow_mock}` |
+| `GET /api/settings/public` | Non-secret page settings: `branding`, allowed file types, max size, speech mode, `user`, `can_review`, `ui: {demo_mode, demo_login, can_ask, allow_mock}` |
 | `POST /api/upload` | Form data, one item per request: `file` or `text`. Needs sign-in (`401` otherwise); any role. No level field: the server assigns `clearance.default_upload_level`. Returns `{id, title, chunks}` (never the level). Refusals: `400` nothing sent, `409` document limit, `411` no length, `413` too big, `415` type not allowed, `422` unreadable or empty |
 | `GET /api/documents` | Top role: `{levels, documents: [{id, title, file_type, level, chunks, size_bytes, created_at}]}` |
 | `POST /api/documents/level` | Top role: `{id, level}` marks who can read a document. `400` unknown level, `404` no such document |
 | `POST /api/ask` | Needs sign-in and an allowed role (`401` / `403`). `{question, history}`, answered as below. `429` daily AI limit, `502` AI service down, `503` anything else |
-| `POST /api/costs/estimate` | Top role only. See [SERVICE_SWITCH_AND_COSTS.md](SERVICE_SWITCH_AND_COSTS.md) |
 
 While the service is off, everything except the status, switch and health routes returns `503 {"detail": "Service offline", "offline": true}`.
 

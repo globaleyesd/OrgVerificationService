@@ -19,7 +19,3 @@ from .config import UI
 
 def can_ask(role: str | None, ui: UI) -> bool:
     return role is not None and role in ui.ask_roles
-
-
-def can_view_costs(role: str | None, levels: list[str]) -> bool:
-    return bool(levels) and role == levels[-1]

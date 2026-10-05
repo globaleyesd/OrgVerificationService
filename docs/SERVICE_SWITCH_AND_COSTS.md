@@ -1,4 +1,4 @@
-# Service switch, credentials folder and cost dashboard
+# Service switch, credentials folder and costs
 
 ## 1. The service switch
 
@@ -96,15 +96,9 @@ A missing record is "nothing stored". A **damaged or unreachable** record is an 
 
 Run them where the credentials live: on your machine for local runs, or on the AWS server (see [COMMANDS.md](COMMANDS.md)).
 
-## 3. Cost dashboard
+## 3. Costs
 
-Open **Costs** in the header (shown to the top clearance level, and to everyone in demo mode). It opens on the **last 30 days**.
-
-- **Period:** a slider with fixed stops (today, 7, 14, 30, 60, 90 days, 6 months, 12 months), or **From/To** date pickers and **Apply dates** for an exact range.
-- **Headline:** the estimated total for the period, how many services are running right now, and the date counting starts from (the project's first recorded usage, so days before the project existed cost nothing).
-- **Services costing money:** every service that cost at least a cent in the period, with its own cost, its share of the total, a bar comparing it to the others and its **live status**: Running, Idle, Stopped, AWS only (it exists only on AWS; locally the amount is what it would cost there) or Not in use. Services running at no cost (the database, an idle local model, ...) are listed in one line underneath.
-- **Cost per day by service:** stacked columns (per week past 90 days) in one fixed colour per service, with a legend. Hover or focus the chart and use the arrow keys to read every service for a day; **Show as a table** lists the same numbers.
-- Running locally, a note says the amounts are what the usage would cost on AWS at the configured rates; nothing is billed.
+The pages have no cost screen. Costs are watched from the **Control Center**: each project's card shows its AWS projection for the month, the services being billed right now, and the **LLM inference API** spend (today, this month, the estimated credit left), all read from this project's logs. On this machine, `python -m app.cli ai-costs [--days N]` prints the AI usage and its cost per model.
 
 ### How the numbers are made
 An **estimate from this project's own meters**, priced with the rates in `config.yaml` (`costs.rates`, `costs.llm_prices_per_mtok`). It is instant. AWS's own bill can differ and arrives up to about a day late, so this is the only way to see "now" numbers.
@@ -115,44 +109,12 @@ An **estimate from this project's own meters**, priced with the rates in `config
 | Public IP | Whole period | `elastic_ip_hourly_usd` per hour (billed even when the server is stopped) |
 | Disk | `deployment.root_volume_gb`, whole period | `ebs_gb_month_usd` per GB-month, prorated by hours/730 |
 | Document storage | Total size of stored documents | `s3_gb_month_usd` per GB-month, prorated |
-| AI usage | Tokens in/out per model, recorded per call | `llm_prices_per_mtok` per million tokens. A model without a price is costed at zero with a warning; on the dashboard, Ollama models (`name:tag`) count as local and free without a warning |
+| AI usage | Tokens in/out per model, recorded per call | `llm_prices_per_mtok` per million tokens. A model without a price is costed at zero with a warning; Ollama models (`name:tag`) count as local and free without a warning |
 
-**Not included in the estimate:** CloudFront and data transfer, request charges, container registry storage, taxes. (The modal does not list these; the API response still carries them in `not_included` for anyone who wants them.) Keep the rates current: AWS and model prices change.
-
-### API contract: `POST /api/costs/services` (the dashboard)
-Request: `{"days": 30}` for the last N days (today included), or `{"start": "...", "end": "..."}` for an exact range (ISO times, at most `costs.max_range_days`).
-
-Response:
-```json
-{
-  "start": "...", "end": "...", "days": 30, "tracking_since": "2026-10-01T23:06:39+00:00", "mode": "local",
-  "total_usd": 0.72, "running_now": 4,
-  "services": [{"key": "server", "label": "App server", "what": "...", "state": "running", "detail": "Answering requests now",
-                "usd": 0.41, "costing": true}],
-  "series": [{"key": "server", "label": "App server"}],
-  "daily": [{"date": "2026-10-02", "usd": {"server": 0.091, "disk": 0.0526}, "total_usd": 0.2636}],
-  "warnings": [], "not_included": ["..."], "calculated_at": "...", "basis": "..."
-}
-```
-`state` comes from live checks made for each request: the database answers a query, the Ollama server reports which model is loaded and how much of it sits on the GPU, the AI provider and key are configured, and the disk and public IP exist only in AWS mode. Errors: `400` bad range, `403` not allowed, `503` meters unavailable. The per-day split is in `app/cost_services.py`.
-
-### API contract: `POST /api/costs/estimate` (any exact range, as one table)
-Request: `{"start": "2026-10-01T00:00:00Z", "end": "2026-10-01T12:00:00Z"}` (ISO times; no zone means UTC; an end in the future is clamped to now).
-
-Response:
-```json
-{
-  "start": "...", "end": "...", "period_hours": 12.0,
-  "lines": [{"key": "compute", "label": "Server (compute)", "detail": "7.2 h running", "usd": 0.121}],
-  "total_usd": 0.31,
-  "warnings": [], "not_included": ["CloudFront and data transfer", "..."],
-  "calculated_at": "...", "basis": "estimate from this project's own usage meters, priced from config.yaml"
-}
-```
-Errors: `400` bad range, `403` not allowed for this account, `503` meters unavailable. The range may be at most `costs.max_range_days`.
+**Not included in the estimate:** CloudFront and data transfer, request charges, taxes. Keep the rates current: AWS and model prices change.
 
 ### Status of the meters
-The estimate maths and the endpoint are built and unit-tested. The database side (heartbeat writer and the usage queries in `app/usage.py`) has **not yet run against a real database**, and nothing records AI tokens yet because the answer pipeline isn't built (`record_tokens` is ready for it). Until then the AI and compute lines read zero in a real deployment. Sample mode (`?mock=1`) shows realistic fictional numbers.
+The server writes a heartbeat row while it runs and one `AI_USAGE` log line per AI call (model, tokens, price). The Control Center reads the log lines; `app.cli ai-costs` reads the database.
 
 ### Not built: comparing with AWS's own bill
 A "compare with AWS" button would call the Cost Explorer API (filtered by a cost-allocation tag). Those calls are charged per request and the data lags, so it is left out of the cheap default. It can be added as an on-demand button later.
