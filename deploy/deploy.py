@@ -67,9 +67,20 @@ def stack_name(cfg: Config) -> str:
     return cfg.project_name
 
 
+def template_version() -> str:
+    """The commit being deployed (with "+changes" if the working tree differs), so every deploy stores its template."""
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return (head or "unknown") + ("+changes" if dirty else "")
+
+
 def stack_parameters(cfg: Config, extra: dict) -> dict:
     d, s = cfg.deployment, cfg.deployment.schedule
     p = {
+        "TemplateVersion": extra.get("TemplateVersion") or template_version(),
         "ProjectName": cfg.project_name,
         "InstanceType": d.instance_type,
         "RootVolumeGb": str(d.root_volume_gb),

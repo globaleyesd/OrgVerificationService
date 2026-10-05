@@ -7,6 +7,10 @@ Description: >
   Nothing secret is stored in this template or sent to AWS by it.
 
 Parameters:
+  TemplateVersion:
+    Type: String
+    Default: unknown
+    Description: The commit this template was deployed from (set by deploy/deploy.py). It makes every deploy a change, so CloudFormation always stores the new template; the power adapter reuses the stored one.
   ProjectName:
     Type: String
     Default: kb-verifier
@@ -882,6 +886,9 @@ Resources:
           Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetEmail}]
 
 Outputs:
+  TemplateVersion:
+    Description: The commit the stored template came from.
+    Value: !Ref TemplateVersion
   SiteAtZero:
     Description: What the site address does while the project is at zero (Power=zero).
     Value: Distribution disabled - nothing answers; only the Control Center is reachable

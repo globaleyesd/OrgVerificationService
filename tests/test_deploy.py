@@ -51,6 +51,15 @@ class UploadSafetyTests(unittest.TestCase):
         d.check_deployable(c)
 
 
+class TemplateVersionTests(unittest.TestCase):
+    def test_every_deploy_stamps_the_commit_so_the_template_is_always_stored(self):
+        p = d.stack_parameters(Config(), {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})
+        self.assertRegex(p["TemplateVersion"], r"^([0-9a-f]{7,}(\+changes)?|unknown)$")
+        tpl = (ROOT / "deploy" / "cloudformation" / "stack.yaml").read_text()
+        self.assertIn("  TemplateVersion:\n    Type: String", tpl)
+        self.assertIn("Value: !Ref TemplateVersion", tpl)
+
+
 class OriginSecretTests(unittest.TestCase):
     def test_the_origin_secret_is_a_parameter_but_never_printed(self):
         import contextlib
