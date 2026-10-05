@@ -340,6 +340,14 @@ class LogTests(TemplateSecurityTests):
             self.assertEqual((lg["options"]["awslogs-group"], lg["options"]["awslogs-stream"]), ("/projects/kb-verifier/app", stream))
 
 
+class DbPasswordFileTests(TemplateSecurityTests):
+    def test_the_app_user_can_read_the_database_password_and_nobody_else(self):
+        import re
+        uid = re.search(r"useradd [^\n]*--uid (\d+)", (ROOT / "Dockerfile").read_text()).group(1)
+        ud = json.dumps(self.res["Server"]["Properties"]["UserData"])
+        self.assertIn("chown %s:%s db_password && chmod 400 db_password" % (uid, uid), ud)
+
+
 class SafeBackupTests(TemplateSecurityTests):
     def test_a_stop_right_after_turn_on_waits_and_never_backs_up_an_unrestored_database(self):
         ud = json.dumps(self.res["Server"]["Properties"]["UserData"])

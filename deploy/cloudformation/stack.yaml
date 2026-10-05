@@ -457,6 +457,7 @@ Resources:
           aws s3 cp s3://${DataBucket}/deploy/config.local.yaml ./config.local.yaml --region ${AWS::Region} 2>/dev/null || echo '{}' > ./config.local.yaml
           # The database password is created here, once, and never leaves this machine.
           [ -f db_password ] || { umask 077; head -c 32 /dev/urandom | base64 | tr -d '\n=' > db_password; }
+          chown 10001:10001 db_password && chmod 400 db_password   # readable by the app only (it runs as uid 10001, see Dockerfile)
           echo "IMAGE=kb-verifier-server:latest" > .env
           echo "CREDS_BUCKET=${CredsBucket}" >> .env
           echo "DATA_BUCKET=${DataBucket}" >> .env
