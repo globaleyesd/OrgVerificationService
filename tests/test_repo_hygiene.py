@@ -315,6 +315,15 @@ class PowerLevelTemplateTests(TemplateSecurityTests):
                 self.assertTrue(all("${ProjectName}-*" in r["!Sub"] for r in x["Resource"]))
 
 
+class SafeBackupTests(TemplateSecurityTests):
+    def test_a_stop_right_after_turn_on_waits_and_never_backs_up_an_unrestored_database(self):
+        ud = json.dumps(self.res["Server"]["Properties"]["UserData"])
+        backup = ud[ud.index("backup.sh <<"):]
+        for must in ("cloud-init status --wait", "[ -f .restored ] ||", "pg_isready"):
+            self.assertIn(must, backup)
+        self.assertLess(backup.index("pg_isready"), backup.index("pg_dump"))      # wait first, dump after
+
+
 class NoLateActionsTests(TemplateSecurityTests):
     def test_background_power_requests_are_never_retried(self):
         c = self.res["PowerNeverRetries"]["Properties"]

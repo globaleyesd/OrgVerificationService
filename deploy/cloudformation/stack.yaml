@@ -477,6 +477,14 @@ Resources:
           # Run by the power adapter before the project goes to zero. Dumps the database to the documents bucket.
           set -euo pipefail
           cd /opt/app
+          # A Stop right after Turn on: wait for the first start to finish (it restores the last backup), and never back up
+          # a server whose restore did not complete, so the good backup is never replaced by an empty database.
+          cloud-init status --wait >/dev/null 2>&1 || true
+          [ -f .restored ] || { echo "the first start has not finished"; exit 1; }
+          for n in $(seq 1 60); do
+            docker compose -f docker-compose.aws.yml --env-file .env exec -T db pg_isready -U app -d app >/dev/null 2>&1 && break
+            sleep 5
+          done
           f=/tmp/db-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
           docker compose -f docker-compose.aws.yml --env-file .env exec -T db pg_dump -U app -d app --clean --if-exists | gzip > "$f"
           [ -s "$f" ] || { echo "empty backup"; exit 1; }
