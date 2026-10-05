@@ -31,16 +31,6 @@
       "what": "The server's disk, kept while stopped, deleted at zero"
     },
     {
-      "name": "ECR image storage (about 1.5 GB)",
-      "monthly_usd": 0.15,
-      "billed_at": [
-        "running",
-        "stopped",
-        "zero"
-      ],
-      "what": "The 3 newest server images"
-    },
-    {
       "name": "S3 storage (about 1 GB)",
       "monthly_usd": 0.02,
       "billed_at": [
@@ -48,12 +38,12 @@
         "stopped",
         "zero"
       ],
-      "what": "Documents, database backups, the page and the credential records"
+      "what": "Documents, database backups, the server image, the page and the credential records"
     },
     {
-      "name": "AI answers (Amazon Bedrock)",
+      "name": "AI answers (claude-haiku-4-5-20251001)",
       "monthly_usd": null,
-      "usage": "per question; set llm.model_answer to a Bedrock model to price it",
+      "usage": "about $0.004 per question",
       "billed_at": [
         "running"
       ],
