@@ -171,14 +171,14 @@ class CostSheetTests(unittest.TestCase):
         self.assertAlmostEqual(by["EC2 server"]["monthly_usd"], round(0.0168 * 730, 2))
         self.assertTrue(all(s["monthly_usd"] is None or s["monthly_usd"] >= 0.01 for s in sheet["services"]))   # a cent or more
 
-    def test_ai_is_always_listed_as_usage_based(self):
+    def test_llm_inference_is_always_listed_as_usage_based_without_a_model_name(self):
         c = Config()
-        ai = [s for s in d.aws_cost_sheet(c)["services"] if s["name"].startswith("AI answers")]
-        self.assertEqual(len(ai), 1); self.assertIsNone(ai[0]["monthly_usd"]); self.assertIn("per question", ai[0]["usage"])
+        rows = [s for s in d.aws_cost_sheet(c)["services"] if s["name"] == "LLM inference API"]
+        self.assertEqual(len(rows), 1); self.assertIsNone(rows[0]["monthly_usd"]); self.assertIn("per question", rows[0]["usage"])
+        self.assertNotIn(c.llm.model_answer, json.dumps(d.aws_cost_sheet(c)))   # the model name is not shown
         c.llm.provider = "local"                                    # on AWS that becomes Bedrock: still listed, unpriced
-        ai = [s for s in d.aws_cost_sheet(c)["services"] if s["name"].startswith("AI answers")]
-        self.assertEqual((ai[0]["name"], ai[0]["monthly_usd"]), ("AI answers (Amazon Bedrock)", None))
-
+        rows = [s for s in d.aws_cost_sheet(c)["services"] if s["name"] == "LLM inference API"]
+        self.assertEqual((len(rows), rows[0]["monthly_usd"]), (1, None))
 
 class DocsAndTasksMatchTheScriptTests(unittest.TestCase):
     def _steps_used(self, text):
