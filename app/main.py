@@ -75,6 +75,15 @@ api = APIRouter(prefix="/api")
 
 
 # ------------------------------------------------------------ middleware
+try:   # a malformed request gets a plain "Bad request", not the API's field names (only with the real FastAPI)
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def _bad_request(request: Request, exc) -> JSONResponse:
+        return JSONResponse({"detail": "Bad request"}, status_code=400)
+except (ImportError, AttributeError):
+    pass
+
 ORIGIN_SECRET = os.environ.get("APP_ORIGIN_SECRET", "")
 
 
