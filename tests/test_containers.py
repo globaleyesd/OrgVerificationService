@@ -36,22 +36,17 @@ class ContainerCommandTests(unittest.TestCase):
         self.assertTrue(ct.gpu_enabled(Containers("rancher-desktop", "moby", "on"), has_nvidia=False))   # forced
         self.assertFalse(ct.gpu_enabled(Containers("docker-desktop", "moby", "off"), has_nvidia=True))
 
-    def test_image_build_and_push_for_arm64_with_either_tool(self):
-        self.assertEqual(ct.build_and_push(DOCKER, "r:t"), [["docker", "buildx", "build", "--platform", "linux/arm64", "-t", "r:t", "--push", "."]])
-        build, push = ct.build_and_push(RANCHER_CONTAINERD, "r:t")
-        self.assertEqual((build[0], build[-1], push[:2]), ("nerdctl", ".", ["nerdctl", "push"]))
-        self.assertIn("linux/arm64", build); self.assertIn("linux/arm64", push)
-
-    def test_registry_login_reads_the_token_from_stdin(self):
-        for c in (DOCKER, RANCHER_CONTAINERD):
-            self.assertIn("--password-stdin", ct.registry_login(c, "123.dkr.ecr.us-east-1.amazonaws.com"))
+    def test_image_is_built_for_arm64_into_a_file_with_either_tool(self):
+        self.assertEqual(ct.build_image_file(DOCKER, "i:t", "/tmp/x.tar"),
+                         [["docker", "buildx", "build", "--platform", "linux/arm64", "-t", "i:t", "--output", "type=docker,dest=/tmp/x.tar", "."]])
+        build, save = ct.build_image_file(RANCHER_CONTAINERD, "i:t", "/tmp/x.tar")
+        self.assertEqual((build[0], build[-1], save[:2], save[-1]), ("nerdctl", ".", ["nerdctl", "save"], "i:t"))
+        self.assertIn("linux/arm64", build); self.assertIn("/tmp/x.tar", save)
 
     def test_deploy_uses_the_chosen_tool(self):
         cfg = Config(); cfg.containers = RANCHER_CONTAINERD
-        cmds = d.cmds_build_push("repo", "latest", cfg)
-        self.assertEqual([c[0] for c in cmds], ["nerdctl", "nerdctl"])
-        self.assertEqual(d.cmd_docker_login("reg", cfg)[0], "nerdctl")
-        self.assertEqual(d.cmd_build_push("repo", "latest")[0], "docker")      # default: Docker Desktop
+        self.assertEqual([c[0] for c in d.cmds_build_image("/tmp/x.tar", cfg)], ["nerdctl", "nerdctl"])
+        self.assertEqual(d.cmds_build_image("/tmp/x.tar")[0][0], "docker")     # default: Docker Desktop
 
     def test_check_lists_the_tools_for_each_setting(self):
         names = [n for n, _, _ in ct.tools_needed(RANCHER_CONTAINERD, deploying=True)]

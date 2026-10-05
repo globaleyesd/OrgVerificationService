@@ -9,7 +9,7 @@ Browser ──https──> CloudFront ──/ (page)──────> private 
                        ├──/control/*──signed──> tiny status function: state for the page; answers /api while at zero
                        │
                        └──/api/*──http:80────> one small ARM server (Docker: API + database)
-                                                  ├─ pulls its image from ECR
+                                                  ├─ loads its image from a file in the documents bucket
                                                   ├─ reads/writes the private documents bucket
                                                   ├─ keeps password hashes, user accounts and the cookie key in a locked-down credentials bucket
                                                   └─ calls Claude: the Anthropic API (key in the credentials bucket) or Bedrock (its own role)
@@ -24,7 +24,7 @@ Browser ──https──> CloudFront ──/ (page)──────> private 
 | CloudFront in front of S3 and the API | Load balancer + certificate setup | HTTPS for free on the default address; CloudFront's free tier is generous |
 | `CPUCredits: standard` | Default "unlimited" | Never pay for surplus CPU credits (may slow under sustained load) |
 | No WAF, no CloudWatch agent, no detailed monitoring | Those services | Each adds monthly cost |
-| ECR keeps only the 3 newest images | Keep everything | Storage cost |
+| The server image is a file in the documents bucket | An image registry (ECR) | ECR bills storage every month; the file costs a few tenths of a cent, so a project at zero costs $0.00 |
 | Optional weekday working-hours schedule (`deployment.schedule`) | Always on | Roughly halves compute |
 | **Switch = stop the server** (a tiny Lambda behind CloudFront) | Leaving the server running while "off" | Off really stops the compute charge. The function stays inside the free tier |
 | Claude Haiku for answers (`config.aws.local.yaml`) | A larger model | About half a cent per question, billed only when someone asks |
@@ -136,4 +136,4 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 16. **No user admin screen or password reset yet**; accounts are managed with the `app.cli` commands.
 
 ## Tearing down
-Empty the page bucket (use the **Empty** button in the S3 console, because the bucket is versioned) and the ECR repository first (CloudFormation can't delete non-empty ones), then delete the stack. Exact commands are in [../docs/COMMANDS.md](../docs/COMMANDS.md). The documents and credentials buckets are kept on purpose; delete them by hand if you want them gone (for the credentials bucket, edit its policy first). The Elastic IP is released with the stack.
+Empty the page bucket (use the **Empty** button in the S3 console, because the bucket is versioned) first. Exact commands are in [../docs/COMMANDS.md](../docs/COMMANDS.md). The documents and credentials buckets are kept on purpose; delete them by hand if you want them gone (for the credentials bucket, edit its policy first). The Elastic IP is released with the stack.

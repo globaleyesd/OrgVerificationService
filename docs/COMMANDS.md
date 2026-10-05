@@ -79,7 +79,7 @@ Run everything from the project folder (the one containing `config.yaml`). The V
 - Deploy everything (stack, image, page, config, server update): `python deploy/deploy.py all`
 - Or one step at a time:
   - `python deploy/deploy.py stack` (create or update the AWS resources)
-  - `python deploy/deploy.py image` (build the arm64 image and push it to ECR)
+  - `python deploy/deploy.py image` (build the arm64 image into a file and upload it to the documents bucket)
   - `python deploy/deploy.py ui` (upload the web pages to the S3 page bucket)
   - `python deploy/deploy.py config` (upload the non-secret config files only)
   - `python deploy/deploy.py update` (tell the server to pull the new image and restart)
@@ -131,7 +131,6 @@ Run everything from the project folder (the one containing `config.yaml`). The V
 
 ## Tear down
 - Empty the page bucket: in the S3 console choose the bucket (name from `outputs`) > **Empty** (it is versioned, so the console button is the reliable way)
-- Delete the images: `aws ecr batch-delete-image --repository-name kb-verifier --image-ids imageTag=latest`
 - Delete the stack:
   - `aws cloudformation delete-stack --stack-name kb-verifier`
   - `aws cloudformation wait stack-delete-complete --stack-name kb-verifier`

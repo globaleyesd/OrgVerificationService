@@ -42,16 +42,13 @@ def compose(c, *args: str, has_nvidia: bool | None = None) -> list[str]:
     return [cli(c), "compose", *files, *args]
 
 
-def registry_login(c, registry: str) -> list[str]:
-    return [cli(c), "login", "--username", "AWS", "--password-stdin", registry]
-
-
-def build_and_push(c, image: str) -> list[list[str]]:
-    """Build the server image for arm64 (the AWS server is Graviton) and push it. The context is filtered by .dockerignore."""
+def build_image_file(c, image: str, dest: str) -> list[list[str]]:
+    """Build the server image for arm64 (the AWS server is Graviton) into a file (`docker load` format). The deploy puts
+    the file in S3 for the server, so no image registry is needed. The context is filtered by .dockerignore."""
     if cli(c) == "nerdctl":
         return [["nerdctl", "build", "--platform", "linux/arm64", "-t", image, "."],
-                ["nerdctl", "push", "--platform", "linux/arm64", image]]
-    return [["docker", "buildx", "build", "--platform", "linux/arm64", "-t", image, "--push", "."]]
+                ["nerdctl", "save", "--platform", "linux/arm64", "-o", dest, image]]
+    return [["docker", "buildx", "build", "--platform", "linux/arm64", "-t", image, "--output", f"type=docker,dest={dest}", "."]]
 
 
 def tools_needed(c, *, deploying: bool = False) -> list[tuple[str, list[str], str]]:

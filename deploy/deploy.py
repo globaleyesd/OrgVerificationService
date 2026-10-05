@@ -19,12 +19,15 @@ read deploy/README.md and use --dry-run first.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import secrets
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -77,7 +80,7 @@ def stack_parameters(cfg: Config, extra: dict) -> dict:
         "StartHour": str(s.start_hour),
         "StopHour": str(s.stop_hour),
     }
-    for key in ("AmiId", "CloudFrontPrefixListId", "BudgetEmail", "ImageTag", "OriginVerifySecret"):
+    for key in ("AmiId", "CloudFrontPrefixListId", "BudgetEmail", "OriginVerifySecret"):
         if extra.get(key):
             p[key] = extra[key]
     missing = [k for k in ("AmiId", "CloudFrontPrefixListId", "OriginVerifySecret") if k not in p]
@@ -108,28 +111,19 @@ def cmd_lookup_prefix_list() -> list[str]:
             "--query", "PrefixLists[0].PrefixListId", "--output", "text"]
 
 
-def registry_host(account_id: str, region: str) -> str:
-    return f"{account_id}.dkr.ecr.{region}.amazonaws.com"
+# COST: the server image is a file in the documents bucket (a few tenths of a cent a month), not in a paid registry.
+IMAGE_NAME = "kb-verifier-server:latest"          # the name the server's compose file runs (update.sh loads the file)
+IMAGE_KEY = "image/server-image.tar.gz"
 
 
-def cmd_ecr_password(region: str) -> list[str]:
-    return ["aws", "ecr", "get-login-password", "--region", region]
-
-
-def cmd_docker_login(registry: str, cfg: Config | None = None) -> list[str]:
-    from app.containers import registry_login
-    return registry_login((cfg or Config()).containers, registry)
-
-
-def cmd_build_push(repo_uri: str, tag: str, cfg: Config | None = None) -> list[str]:
-    """The single build-and-push command (Docker Desktop, or Rancher Desktop with moby). See cmds_build_push for nerdctl."""
-    return cmds_build_push(repo_uri, tag, cfg)[0]
-
-
-def cmds_build_push(repo_uri: str, tag: str, cfg: Config | None = None) -> list[list[str]]:
+def cmds_build_image(dest: str, cfg: Config | None = None) -> list[list[str]]:
     # arm64 because the server is a Graviton (t4g) instance. The build context is filtered by .dockerignore.
-    from app.containers import build_and_push
-    return build_and_push((cfg or Config()).containers, f"{repo_uri}:{tag}")
+    from app.containers import build_image_file
+    return build_image_file((cfg or Config()).containers, IMAGE_NAME, dest)
+
+
+def cmd_upload_image(data_bucket: str, path: str) -> list[str]:
+    return ["aws", "s3", "cp", path, f"s3://{data_bucket}/{IMAGE_KEY}", "--only-show-errors"]
 
 
 def cmd_sync_ui(ui_bucket: str) -> list[str]:
@@ -249,7 +243,7 @@ def resolve_extra(runner: Runner, refresh_ami: bool) -> dict:
 
 def get_outputs(runner: Runner, cfg: Config) -> dict:
     if runner.dry:
-        return {k: f"<{k}>" for k in ("UiBucketName", "DataBucketName", "RepositoryUri", "InstanceId", "SiteUrl")}
+        return {k: f"<{k}>" for k in ("UiBucketName", "DataBucketName", "InstanceId", "SiteUrl")}
     raw = runner.run(cmd_outputs(cfg), capture=True)
     return {o["OutputKey"]: o["OutputValue"] for o in json.loads(raw or "[]")}
 
@@ -260,13 +254,19 @@ def step_stack(r: Runner, cfg: Config, refresh_ami=False) -> None:
 
 
 def step_image(r: Runner, cfg: Config) -> None:
-    out = get_outputs(r, cfg)
-    repo = out["RepositoryUri"]
-    registry = repo.split("/")[0]
-    pw = r.run(cmd_ecr_password(cfg.deployment.region), capture=True)
-    r.run(cmd_docker_login(registry, cfg), stdin_text=pw)       # the short-lived registry token goes to stdin only
-    for cmd in cmds_build_push(repo, load_params_file().get("ImageTag") or "latest", cfg):   # docker or nerdctl (containers.engine)
-        r.run(cmd)
+    bucket = get_outputs(r, cfg)["DataBucketName"]
+    work = Path(tempfile.mkdtemp(prefix="kb-image-"))      # outside the project, so it never enters a build context
+    tar, gz = work / "server-image.tar", work / "server-image.tar.gz"
+    try:
+        for cmd in cmds_build_image(str(tar), cfg):        # docker or nerdctl (containers.engine)
+            r.run(cmd)
+        if not r.dry:
+            with open(tar, "rb") as src, gzip.open(gz, "wb", compresslevel=6) as dst:
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+            print(f"image file: {gz.stat().st_size / 1e6:.0f} MB")
+        r.run(cmd_upload_image(bucket, str(gz)))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def step_ui(r: Runner, cfg: Config) -> None:
@@ -293,8 +293,6 @@ def step_outputs(r: Runner, cfg: Config) -> None:
 
 # ---------------------------------------------------------------- cost sheet for the Control Center
 HOURS_PER_MONTH = 730
-ECR_GB_MONTH_USD = 0.10          # ECR storage price (us-east-1 at last check)
-ECR_IMAGES_GB = 1.5              # the 3 images the repository keeps
 S3_STORED_GB = 1.0               # documents, database backups and the page: a generous guess for a small team
 ALL_LEVELS = ["running", "stopped", "zero"]
 
@@ -310,10 +308,8 @@ def aws_cost_sheet(cfg: Config) -> dict:
          "what": "Billed every hour it exists, also while the server is stopped"},
         {"name": f"EBS disk ({dpl.root_volume_gb} GB gp3)", "monthly_usd": r.ebs_gb_month_usd * dpl.root_volume_gb, "billed_at": ["running", "stopped"],
          "what": "The server's disk, kept while stopped, deleted at zero"},
-        {"name": f"ECR image storage (about {ECR_IMAGES_GB:g} GB)", "monthly_usd": ECR_GB_MONTH_USD * ECR_IMAGES_GB, "billed_at": ALL_LEVELS,
-         "what": "The 3 newest server images"},
         {"name": f"S3 storage (about {S3_STORED_GB:g} GB)", "monthly_usd": r.s3_gb_month_usd * S3_STORED_GB, "billed_at": ALL_LEVELS,
-         "what": "Documents, database backups, the page and the credential records"},
+         "what": "Documents, database backups, the server image, the page and the credential records"},
     ]
     model = cfg.llm.model_answer
     price = cfg.costs.llm_prices_per_mtok.get(model)

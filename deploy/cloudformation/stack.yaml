@@ -38,9 +38,6 @@ Parameters:
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: Give the server permission to call Amazon Bedrock (needed when llm.provider is bedrock, so no API key is ever stored).
-  ImageTag:
-    Type: String
-    Default: latest
   OriginVerifySecret:
     Type: String
     NoEcho: true
@@ -252,16 +249,6 @@ Resources:
               StringNotEquals:
                 'aws:PrincipalArn': [!GetAtt ServerRole.Arn, !GetAtt ControlRole.Arn]
 
-  Repository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Ref ProjectName
-      ImageScanningConfiguration: {ScanOnPush: true}
-      EncryptionConfiguration: {EncryptionType: AES256}
-      LifecyclePolicy:
-        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"COST - keep only the 3 newest images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}'
-      Tags: [{Key: Project, Value: !Ref ProjectName}]
-
   # ------------------------------------------------------------------ web page + API entry point
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -394,11 +381,6 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {Sid: EcrLogin, Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
-              - Sid: EcrPull
-                Effect: Allow
-                Action: ['ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage']
-                Resource: !GetAtt Repository.Arn
               - Sid: CredentialsList
                 Effect: Allow
                 Action: 's3:ListBucket'
@@ -466,14 +448,15 @@ Resources:
           aws s3 cp s3://${DataBucket}/deploy/config.local.yaml ./config.local.yaml --region ${AWS::Region} 2>/dev/null || echo '{}' > ./config.local.yaml
           # The database password is created here, once, and never leaves this machine.
           [ -f db_password ] || { umask 077; head -c 32 /dev/urandom | base64 | tr -d '\n=' > db_password; }
-          echo "IMAGE=${Repository.RepositoryUri}:${ImageTag}" > .env
+          echo "IMAGE=kb-verifier-server:latest" > .env
           echo "CREDS_BUCKET=${CredsBucket}" >> .env
           echo "DATA_BUCKET=${DataBucket}" >> .env
           echo "AWS_REGION_NAME=${AWS::Region}" >> .env
           echo "ORIGIN_SECRET=${OriginVerifySecret}" >> .env
           chmod 600 .env
-          aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
-          docker compose -f docker-compose.aws.yml --env-file .env pull
+          # COST: the app image is a file in the documents bucket (no paid registry); the database image is public.
+          aws s3 cp s3://${DataBucket}/image/server-image.tar.gz - --region ${AWS::Region} | gunzip | docker load
+          docker compose -f docker-compose.aws.yml --env-file .env pull db
           # First start of a new server (for example coming back from zero): restore the latest database backup BEFORE
           # the app starts, so the app never creates empty tables first. Runs once per server.
           if [ ! -f .restored ]; then
@@ -687,10 +670,6 @@ Resources:
                          'iam:GetInstanceProfile', 'iam:ListInstanceProfilesForRole']
                 Resource: [!Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-*',
                            !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-*']
-              - Sid: ReadTheImageRepository
-                Effect: Allow
-                Action: ['ecr:DescribeRepositories', 'ecr:GetLifecyclePolicy', 'ecr:GetRepositoryPolicy', 'ecr:ListTagsForResource']
-                Resource: !GetAtt Repository.Arn
               - Sid: UseTheDefaultDiskKeyThroughEc2Only   # the new server's encrypted disk (AWS's own aws/ebs key)
                 Effect: Allow
                 Action: ['kms:CreateGrant', 'kms:Decrypt', 'kms:DescribeKey', 'kms:GenerateDataKeyWithoutPlaintext', 'kms:ReEncrypt*']
@@ -897,8 +876,6 @@ Outputs:
     Value: !Ref CredsBucket
   ControlFunctionName:
     Value: !Ref ControlFunction
-  RepositoryUri:
-    Value: !GetAtt Repository.RepositoryUri
   InstanceId:
     Condition: PowerOn
     Value: !Ref Server

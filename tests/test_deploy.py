@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -97,8 +98,8 @@ class CommandTests(unittest.TestCase):
     def test_aws_keys_never_appear_in_any_command(self):
         c = cfg_with_keys()
         params = d.stack_parameters(c, {"AmiId": "ami-123", "CloudFrontPrefixListId": "pl-123", "OriginVerifySecret": "s" * 43})
-        cmds = [d.cmd_stack(c, params), d.cmd_outputs(c), d.cmd_ecr_password("us-east-1"), d.cmd_docker_login("reg"),
-                d.cmd_build_push("repo", "latest"), d.cmd_sync_ui("b"), d.cmd_upload_config("b", "config.yaml"),
+        cmds = [d.cmd_stack(c, params), d.cmd_outputs(c), *d.cmds_build_image("/tmp/x.tar"), d.cmd_upload_image("b", "/tmp/x.tar.gz"),
+                d.cmd_sync_ui("b"), d.cmd_upload_config("b", "config.yaml"),
                 d.cmd_update_server("i-1"), d.cmd_lookup_ami(), d.cmd_lookup_prefix_list()]
         flat = " ".join(" ".join(x) for x in cmds)
         for secret in ("AKIAFAKEKEYFORTESTING", "fake/secret/for/testing/only", "fake-session-token"):
@@ -114,14 +115,22 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(d.aws_env(c)["AWS_PROFILE"], "myprofile")
 
     def test_commands_are_argument_lists_not_shell_strings(self):
-        for cmd in (d.cmd_sync_ui("b"), d.cmd_update_server("i-1"), d.cmd_build_push("r", "t")):
+        for cmd in (d.cmd_sync_ui("b"), d.cmd_update_server("i-1"), *d.cmds_build_image("/tmp/x.tar")):
             self.assertIsInstance(cmd, list)
             self.assertTrue(all(isinstance(x, str) for x in cmd))
 
-    def test_image_is_built_for_arm_and_pushed(self):
-        cmd = d.cmd_build_push("repo", "latest")
+    def test_image_is_built_for_arm_into_a_file_and_goes_to_the_documents_bucket(self):
+        cmd = d.cmds_build_image("/tmp/x.tar")[0]
         self.assertIn("linux/arm64", cmd)
         self.assertEqual(cmd[-1], ".")
+        self.assertEqual(d.cmd_upload_image("bkt", "/tmp/x.tar.gz")[4], "s3://bkt/image/server-image.tar.gz")
+
+    def test_no_image_registry_anywhere(self):
+        tpl = (ROOT / "deploy" / "cloudformation" / "stack.yaml").read_text()
+        self.assertNotIn("AWS::ECR::", tpl)
+        self.assertNotIn("ecr:", tpl)
+        self.assertIn("image/server-image.tar.gz - --region", tpl)                 # update.sh loads the image file
+        self.assertNotIn("ECR", json.dumps(d.aws_cost_sheet(Config())))
 
     def test_server_command_is_the_fixed_script(self):
         self.assertIn("commands=/opt/app/update.sh", d.cmd_update_server("i-1"))

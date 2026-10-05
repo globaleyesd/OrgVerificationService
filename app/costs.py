@@ -5,7 +5,7 @@ priced with the rates in config.yaml. It is available immediately. AWS's own bil
 differ and arrives up to about a day late. See docs/SERVICE_SWITCH_AND_COSTS.md.
 
 Included : server compute, public IP, disk, document storage, AI usage.
-Not included: CloudFront and data transfer, request charges, ECR, tax, and anything outside this project.
+Not included: CloudFront and data transfer, request charges, tax, and anything outside this project.
 """
 from __future__ import annotations
 
