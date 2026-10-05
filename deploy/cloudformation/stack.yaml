@@ -308,7 +308,7 @@ Resources:
         Comment: !Sub '${ProjectName} page and API'
         DefaultRootObject: index.html
         HttpVersion: http2and3
-        IPV6Enabled: true
+        IPV6Enabled: false                    # IPv4 reaches everyone; some networks cannot reach CloudFront over IPv6
         PriceClass: PriceClass_100            # COST - cheapest edge locations
         Origins:
           - Id: ui
