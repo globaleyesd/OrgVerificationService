@@ -50,6 +50,31 @@ class UploadSafetyTests(unittest.TestCase):
         d.check_deployable(c)
 
 
+class BranchTests(unittest.TestCase):
+    def test_aws_changes_only_from_the_prod_branch(self):
+        for step in ("all", "stack", "image", "ui", "config", "update"):
+            for branch in ("dev", "main", "feature-x", None):
+                with self.assertRaises(d.DeployError, msg=(step, branch)):
+                    d.check_branch(step, False, branch)
+            d.check_branch(step, False, "prod")
+
+    def test_previews_and_read_only_steps_run_anywhere(self):
+        d.check_branch("all", True, "dev")
+        d.check_branch("outputs", False, "dev")
+        d.check_branch("cost-sheet", False, None)
+
+    def test_main_stops_before_any_aws_command_on_dev(self):
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch.object(d, "current_branch", return_value="dev"), \
+                mock.patch.object(d.subprocess, "run", side_effect=AssertionError("no command may run")), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(d.main(["stack"]), 1)
+        self.assertIn("only on the prod branch", out.getvalue())
+
+
 class CommandTests(unittest.TestCase):
     def test_aws_keys_never_appear_in_any_command(self):
         c = cfg_with_keys()

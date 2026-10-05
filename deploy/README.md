@@ -44,6 +44,10 @@ Rough monthly infrastructure bill in us-east-1 (check current prices): **about $
 6. Validate the template before the first deploy: install cfn-lint, then `cfn-lint deploy/cloudformation/stack.yaml`. The VS Code cfn-lint extension does this as you edit.
 
 ## Deploy
+Branches: work on `dev` (it runs locally with Docker Compose), then merge into `prod` and deploy from there:
+`git checkout prod && git merge dev && python deploy/deploy.py all`. Steps that change AWS refuse to run on any other
+branch; the preview (`--dry-run`), `outputs` and `cost-sheet` run anywhere.
+
 Run the tasks from **Terminal > Run Task** (or `python deploy/deploy.py <step>`; every command is listed in [../docs/COMMANDS.md](../docs/COMMANDS.md)):
 
 1. **Deploy: preview all steps (dry run)**: prints every command and runs nothing.

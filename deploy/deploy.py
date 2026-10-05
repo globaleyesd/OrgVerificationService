@@ -5,6 +5,9 @@
     python deploy/deploy.py cost-sheet     # writes deploy/aws-costs.json (what each AWS service costs; read by the Control Center)
     add --dry-run to print the commands without running them
 
+Branches: work on dev (runs locally with Docker Compose), merge into prod to deploy. Steps that change AWS run only
+on the prod branch; --dry-run, outputs and cost-sheet run anywhere.
+
 Security rules this script follows (and tests/test_deploy.py checks):
   * It only uploads a fixed allow-list of NON-secret files. creds/, secrets*, keys, .env and data/ can never be sent.
   * AWS credentials from secrets.local.yaml (if you use them) are handed to the aws/docker commands through
@@ -157,6 +160,26 @@ def cmd_update_server(instance_id: str) -> list[str]:
 
 
 # ---------------------------------------------------------------- running
+DEPLOY_BRANCH = "prod"
+READ_ONLY_STEPS = ("outputs", "cost-sheet")
+
+
+def current_branch() -> str | None:
+    try:
+        r = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def check_branch(step: str, dry_run: bool, branch: str | None) -> None:
+    if dry_run or step in READ_ONLY_STEPS or branch == DEPLOY_BRANCH:
+        return
+    raise DeployError(f"Deploying to AWS runs only on the {DEPLOY_BRANCH} branch (this is '{branch or 'no branch'}'): "
+                      f"merge your work into {DEPLOY_BRANCH}, then git checkout {DEPLOY_BRANCH}. "
+                      "For local development use docker compose (docs/RUNNING_LOCALLY.md).")
+
+
 def aws_env(cfg: Config) -> dict:
     env = dict(os.environ)
     a = cfg.secrets.aws
@@ -319,6 +342,9 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     os.chdir(ROOT)
     try:
+        branch = current_branch()
+        print(f"branch: {branch or 'none'}")
+        check_branch(a.step, a.dry_run, branch)
         cfg = load_config(require_secrets=False, local_path=ROOT / server_local_config())   # the server's settings
         if a.step != "cost-sheet":
             check_deployable(cfg)
