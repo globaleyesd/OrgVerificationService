@@ -5,6 +5,7 @@
   python -m app.cli ai-costs [--days N]              AI usage and its cost per model as JSON (this month, or the last N days)
   python -m app.cli create-demo-users [--reset]
   python -m app.cli set-user-password USERNAME
+  python -m app.cli set-llm-key                      save the Anthropic API key in the credentials store (asked, not shown)
   python -m app.cli list-users
   python -m app.cli ingest PATH [--level LEVEL]      read a file or a folder into the document store
   python -m app.cli list-documents
@@ -24,6 +25,7 @@ from .auth import DEMO_USERS, UserExists, UserStore
 from .config import ConfigError, load_config
 from .credstore import CredentialStoreError, make_store
 from .ingest import IngestError, ingest_bytes, reindex_document
+from .llm import LLM_KEY_RECORD
 from .parsers import SUPPORTED_EXTENSIONS, ParseError
 from .service_switch import LockedOut, ServiceSwitch, WeakPassword, WrongPassword
 
@@ -116,6 +118,12 @@ def main(argv: list[str], services=None) -> int:
         elif cmd == "set-user-password" and len(rest) == 1:
             users.set_password(rest[0], _ask_password(f"New password for {rest[0]}: "))
             print("Saved. Only a salted hash is stored.")
+        elif cmd == "set-llm-key" and not rest:
+            key = getpass.getpass("Anthropic API key (not shown): ").strip()
+            if not key.startswith("sk-ant-"):
+                raise ValueError("That is not an Anthropic API key (they start with sk-ant-)")
+            store.write(LLM_KEY_RECORD, {"api_key": key})
+            print("Saved in the credentials store. Restart the app to use it.")
         elif cmd == "ingest" and rest and (len(rest) == 1 or (len(rest) == 3 and rest[1] == "--level")):
             from .services import build_services
             return _ingest(cfg, services or build_services(cfg), rest[0], rest[2] if len(rest) == 3 else None)

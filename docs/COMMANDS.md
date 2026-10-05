@@ -122,6 +122,7 @@ Run everything from the project folder (the one containing `config.yaml`). The V
     `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli create-demo-users`
   - Set a user's password yourself (prompted, not echoed): `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli set-user-password eileen`
   - List users: `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli list-users`
+  - Save the Anthropic API key (asked, not shown; then restart the API): `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli set-llm-key`
   - Set the real switch password: `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli set-switch-password`
   - If you have turned on Session Manager session logging, the one-time passwords printed by `create-demo-users` will be in those logs. Use `set-user-password` (prompted, not echoed) instead
 - Check the result of a remote update: `aws ssm list-command-invocations --instance-id INSTANCE_ID --details`

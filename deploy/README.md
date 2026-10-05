@@ -12,7 +12,7 @@ Browser ──https──> CloudFront ──/ (page)──────> private 
                                                   ├─ pulls its image from ECR
                                                   ├─ reads/writes the private documents bucket
                                                   ├─ keeps password hashes, user accounts and the cookie key in a locked-down credentials bucket
-                                                  └─ calls Amazon Bedrock with its own IAM role (no API key)
+                                                  └─ calls Claude: the Anthropic API (key in the credentials bucket) or Bedrock (its own role)
 ```
 
 ## Cost choices (all deliberate, 💰)
@@ -27,7 +27,7 @@ Browser ──https──> CloudFront ──/ (page)──────> private 
 | ECR keeps only the 3 newest images | Keep everything | Storage cost |
 | Optional weekday working-hours schedule (`deployment.schedule`) | Always on | Roughly halves compute |
 | **Switch = stop the server** (a tiny Lambda behind CloudFront) | Leaving the server running while "off" | Off really stops the compute charge. The function stays inside the free tier |
-| AI via Bedrock and the server's role | Storing an API key | No secret has to leave your machine |
+| Claude Haiku for answers (`config.aws.local.yaml`) | A larger model | About half a cent per question, billed only when someone asks |
 
 Rough monthly infrastructure bill in us-east-1 (check current prices): **about $17-18 always-on, about $9 with the working-hours schedule, and about $5-6 while the switch has the server stopped**, before AI usage. That is the server (about $12 always-on), the Elastic IP (about $3.65, billed even when stopped), disk (about $1.60) and small items. The in-app **Costs** button shows the live estimate.
 
@@ -38,7 +38,9 @@ Rough monthly infrastructure bill in us-east-1 (check current prices): **about $
    - Or put keys in `secrets.local.yaml`. They are passed to the AWS and Docker commands through their environment only, never written to disk or printed, and never sent to AWS by this project.
 3. Copy `config.local.example.yaml` to `config.local.yaml` and set your display name and colours. It is git-ignored.
 4. Optional: create `deploy/params.local.json` (git-ignored) with `{"BudgetEmail": "you@example.com"}` for budget alerts.
-5. In `config.yaml` or `config.local.yaml` set `llm.provider: bedrock` (the AWS default), choose `deployment.region`, and make sure the model you want is enabled for your account in Bedrock. Check Bedrock pricing and model names for your region. Put the **Bedrock model id** in `llm.model_answer` and its price under `costs.llm_prices_per_mtok`.
+5. Put the **server's** settings in `config.aws.local.yaml` (git-ignored). The deploy uploads it as the server's `config.local.yaml`, so your own `config.local.yaml` (for example the local model) stays on your machine. The local model can't run on the small server, so the deploy refuses `llm.provider: local`. Two ways to give the server Claude:
+   - **Anthropic API** (`llm.provider: anthropic`, `llm.model_answer: claude-haiku-4-5-20251001`): after the first deploy, save the key **on the server** (below). The server's role gets no Bedrock access.
+   - **Bedrock** (`llm.provider: bedrock`): no key; enable the model for your account in Bedrock, put the **Bedrock model id** in `llm.model_answer` and its price under `costs.llm_prices_per_mtok`.
 6. Validate the template before the first deploy: install cfn-lint, then `cfn-lint deploy/cloudformation/stack.yaml`. The VS Code cfn-lint extension does this as you edit.
 
 ## Deploy
@@ -54,6 +56,12 @@ Day to day:
 - Changed the pages only: **upload web page**.
 - Changed the code: **build and push image**, then **update server**.
 - Changed `config.yaml` or `config.local.yaml`: **upload non-secret config**, then **update server**.
+
+### Save the Anthropic API key (llm.provider: anthropic)
+Open a shell on the server (`aws ssm start-session --target INSTANCE_ID`) and from `/opt/app` run:
+`sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli set-llm-key`
+then `sudo docker compose -f docker-compose.aws.yml --env-file .env restart api`. The key is asked for, not shown, and saved in
+the credentials bucket that only the server's role can read. It is never in a file on your machine, the template or git.
 
 ### Create the demo users (after the first deploy)
 The server must be running (turn the service on first). Open a shell on it with `aws ssm start-session --target INSTANCE_ID`, then from `/opt/app` run:

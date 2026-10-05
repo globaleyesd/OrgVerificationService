@@ -53,7 +53,7 @@ python -m unittest discover -s tests -t .
 Credentials never go in git, in Docker images, or to any cloud provider:
 - `secrets.local.yaml` and the `creds/` folder are git-ignored and docker-ignored. On AWS, password hashes and accounts live in a locked-down S3 bucket that only the server can read.
 - Private display settings go in `config.local.yaml` (also git-ignored).
-- The AWS setup needs no API key: AI calls use the server's IAM role.
+- On AWS the Anthropic API key is typed into the server and kept in its private credentials bucket (or use Bedrock with no key).
 
 ## Roadmap
 - [x] Sign-in, session cookies and role checks (two demo accounts)

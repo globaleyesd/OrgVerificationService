@@ -169,7 +169,7 @@ Create it with `cp secrets.example.yaml secrets.local.yaml`. It is only needed f
 |---|---|---|
 | `aws.access_key_id`, `secret_access_key`, `session_token` | Deploying without a profile | Used by `deploy/deploy.py` on your machine only (passed through environment variables, never written or printed). |
 | `aws.profile` | Alternative to keys | Named AWS CLI profile. |
-| `llm.api_key` | `llm.provider: anthropic`, optional | Local runs only. Blank: the app starts and `/ask` answers "Questions are turned off". The AWS setup uses Bedrock, so no key goes to AWS. |
+| `llm.api_key` | `llm.provider: anthropic`, optional | Local runs. Blank: the app starts and `/ask` answers "Questions are turned off". On AWS the key is not in this file: `app.cli set-llm-key` saves it on the server in the credentials bucket. |
 | `admin.username`, `admin.password` | Later | Optional. Leave blank to have one generated when sign-in is added. |
 
 ### Where secrets live

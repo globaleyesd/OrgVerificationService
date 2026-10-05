@@ -25,7 +25,7 @@ class UploadSafetyTests(unittest.TestCase):
     def test_credential_files_always_refused(self):
         for bad in ("secrets.local.yaml", "creds/service_switch.json", ".env", "data/db_password", "db_password",
                     "../secrets.local.yaml", "server.pem", "deploy/params.local.json", ".aws/credentials",
-                    "config.local.yaml.bak", "docker-compose.yml"):
+                    "config.local.yaml.bak", "config.aws.local.yaml.bak", "docker-compose.yml"):
             with self.assertRaises(d.DeployError, msg=bad):
                 d.assert_safe_upload(bad)
 
@@ -34,6 +34,20 @@ class UploadSafetyTests(unittest.TestCase):
             d.cmd_upload_config("bucket", "creds/service_switch.json")
         cmd = d.cmd_upload_config("bucket", "config.yaml")
         self.assertEqual(cmd[-1], "s3://bucket/deploy/config.yaml")
+
+    def test_server_overrides_go_up_as_the_servers_config_local(self):
+        cmd = d.cmd_upload_config("bucket", "config.aws.local.yaml", as_name="config.local.yaml")
+        self.assertEqual(cmd[-2:], ["config.aws.local.yaml", "s3://bucket/deploy/config.local.yaml"])
+        with self.assertRaises(d.DeployError):
+            d.cmd_upload_config("bucket", "secrets.local.yaml", as_name="config.local.yaml")
+
+    def test_the_local_model_is_refused_for_aws(self):
+        c = Config()
+        c.llm.provider = "local"
+        with self.assertRaises(d.DeployError):
+            d.check_deployable(c)
+        c.llm.provider = "anthropic"
+        d.check_deployable(c)
 
 
 class CommandTests(unittest.TestCase):

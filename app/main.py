@@ -26,7 +26,7 @@ from .costs import RangeError, estimate, parse_range
 from .credstore import CredentialStoreError, make_store
 from .gate import OFFLINE_MESSAGE, blocked_when_off
 from .ingest import IngestError, ingest_bytes, ingest_text
-from .llm import LlmError, LlmNotConfigured
+from .llm import LlmError, LlmNotConfigured, use_stored_key
 from .pages import CSP, PAGES, with_versions
 from .rbac import can_relabel
 from .services import build_services
@@ -42,6 +42,7 @@ COOKIE = "session"
 try:
     cfg = load_config(CONFIG_PATH, SECRETS_PATH, local_path=LOCAL_PATH)   # refuses to start on bad or placeholder config
     store = make_store(cfg)
+    use_stored_key(cfg, store)
     switch = ServiceSwitch.from_config(cfg, store)
     # A missing/default switch password is only tolerated in demo mode.
     switch.ensure_credentials(allow_default=cfg.ui.demo_mode)
@@ -295,7 +296,7 @@ def _clean_history(raw) -> list[dict]:
 def _problem(e: Exception) -> HTTPException:
     """Turn an unexpected failure into a plain message, never a stack trace or internal detail."""
     if isinstance(e, LlmNotConfigured):
-        return HTTPException(status_code=503, detail="Questions are turned off: no AI key is set. Add llm.api_key to secrets.local.yaml and restart.")
+        return HTTPException(status_code=503, detail="Questions are turned off: no AI key is set. Add llm.api_key to secrets.local.yaml (on AWS: set-llm-key) and restart.")
     if isinstance(e, LlmError):
         log.warning("AI service problem: %s", e)
         return HTTPException(status_code=502, detail="The AI service is unavailable right now")

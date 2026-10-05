@@ -183,7 +183,7 @@ class CredentialsBucketTests(TemplateSecurityTests):
         for bad in ("creds/users/eileen.json", "users/eileen.json", "service_switch.json", "session_key.json"):
             with self.assertRaises(d.DeployError):
                 d.assert_safe_upload(bad)
-        self.assertEqual(set(d.UPLOAD_ALLOWLIST), {"docker-compose.aws.yml", "config.yaml", "config.local.yaml"})
+        self.assertEqual(set(d.UPLOAD_ALLOWLIST), {"docker-compose.aws.yml", "config.yaml", "config.local.yaml", "config.aws.local.yaml"})
 
     def test_requirements_include_boto3_for_the_s3_store(self):
         self.assertIn("boto3", (ROOT / "requirements.txt").read_text())

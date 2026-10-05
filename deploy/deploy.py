@@ -33,7 +33,10 @@ PARAMS_FILE = ROOT / "deploy" / "params.local.json"       # git-ignored: e-mail 
 UI_DIR = "app/web"
 
 # The ONLY local files that may ever be uploaded to AWS (to <data bucket>/deploy/).
-UPLOAD_ALLOWLIST = ("docker-compose.aws.yml", "config.yaml", "config.local.yaml")
+UPLOAD_ALLOWLIST = ("docker-compose.aws.yml", "config.yaml", "config.local.yaml", "config.aws.local.yaml")
+# The server's own overrides (git-ignored). When present it is uploaded AS the server's config.local.yaml, so this
+# machine's config.local.yaml (for example the local model) stays here.
+AWS_LOCAL_CONFIG = "config.aws.local.yaml"
 FORBIDDEN_FOLDERS = {"creds", "data", ".aws", ".vscode"}
 FORBIDDEN_SUFFIXES = (".pem", ".key", ".p12")
 
@@ -131,9 +134,20 @@ def cmd_sync_ui(ui_bucket: str) -> list[str]:
     return ["aws", "s3", "sync", UI_DIR, f"s3://{ui_bucket}", "--delete", "--cache-control", "no-cache"]
 
 
-def cmd_upload_config(data_bucket: str, filename: str) -> list[str]:
+def cmd_upload_config(data_bucket: str, filename: str, as_name: str | None = None) -> list[str]:
     assert_safe_upload(filename)
-    return ["aws", "s3", "cp", filename, f"s3://{data_bucket}/deploy/{filename}"]
+    return ["aws", "s3", "cp", filename, f"s3://{data_bucket}/deploy/{as_name or filename}"]
+
+
+def server_local_config() -> str:
+    """The file that becomes config.local.yaml on the server."""
+    return AWS_LOCAL_CONFIG if (ROOT / AWS_LOCAL_CONFIG).exists() else "config.local.yaml"
+
+
+def check_deployable(cfg: Config) -> None:
+    if cfg.llm.provider == "local":
+        raise DeployError("llm.provider is 'local' (a model run by Ollama), which the small AWS server can't run. "
+                          f"Put the server's AI settings in {AWS_LOCAL_CONFIG} (see deploy/README.md).")
 
 
 def cmd_update_server(instance_id: str) -> list[str]:
@@ -226,9 +240,11 @@ def step_ui(r: Runner, cfg: Config) -> None:
 
 def step_config(r: Runner, cfg: Config) -> None:
     bucket = get_outputs(r, cfg)["DataBucketName"]
-    for name in UPLOAD_ALLOWLIST:
-        if (ROOT / name).exists():
-            r.run(cmd_upload_config(bucket, name))
+    for name in ("docker-compose.aws.yml", "config.yaml"):
+        r.run(cmd_upload_config(bucket, name))
+    local = server_local_config()
+    if (ROOT / local).exists():
+        r.run(cmd_upload_config(bucket, local, as_name="config.local.yaml"))
 
 
 def step_update(r: Runner, cfg: Config) -> None:
@@ -303,7 +319,9 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     os.chdir(ROOT)
     try:
-        cfg = load_config(require_secrets=False)
+        cfg = load_config(require_secrets=False, local_path=ROOT / server_local_config())   # the server's settings
+        if a.step != "cost-sheet":
+            check_deployable(cfg)
         if cfg.ui.demo_mode:
             print("Note: ui.demo_mode is true. Set it to false before real use (see docs/UI.md).")
         r = Runner(aws_env(cfg), a.dry_run)

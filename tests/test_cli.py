@@ -56,6 +56,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.store.read("users/allminuseileen")["role"], "employee")
         self.assertEqual(self.store.read("users/allminuseileen")["display_name"], "AllMinusEileen")
 
+    def test_set_llm_key_saves_it_in_the_credentials_store_and_the_app_uses_it(self):
+        from unittest import mock
+        from app.config import load_config
+        from app.llm import use_stored_key
+        with mock.patch("getpass.getpass", return_value="not-a-key"):
+            self.assertEqual(self.run_cli("set-llm-key")[0], 1)
+        with mock.patch("getpass.getpass", return_value="sk-ant-test-key "):
+            code, out = self.run_cli("set-llm-key")
+        self.assertEqual(code, 0)
+        self.assertNotIn("sk-ant", out)
+        self.assertEqual(self.store.read("llm_api_key"), {"api_key": "sk-ant-test-key"})
+        cfg = load_config(require_secrets=False)
+        cfg.llm.provider, cfg.secrets.llm.api_key = "anthropic", ""
+        use_stored_key(cfg, self.store)
+        self.assertEqual(cfg.secrets.llm.api_key, "sk-ant-test-key")
+        cfg.llm.provider, cfg.secrets.llm.api_key = "local", ""
+        use_stored_key(cfg, self.store)
+        self.assertEqual(cfg.secrets.llm.api_key, "")
+
     def test_passwords_are_shown_once_and_stored_only_as_hashes(self):
         _, out = self.run_cli("create-demo-users")
         pws = re.findall(r"password: (\S+)", out)
@@ -150,7 +169,7 @@ class DocumentCommandTests(CliTests):
 
 class DocsMatchCliTests(unittest.TestCase):
     def test_every_cli_command_in_the_docs_exists(self):
-        real = {"set-switch-password", "create-demo-users", "set-user-password", "list-users", "ingest", "list-documents", "set-document-level", "reindex", "service"}
+        real = {"set-switch-password", "create-demo-users", "set-user-password", "list-users", "ingest", "list-documents", "set-document-level", "reindex", "service", "set-llm-key"}
         used = set()
         for f in list((ROOT / "docs").glob("*.md")) + [ROOT / "README.md", ROOT / "deploy" / "README.md"]:
             used |= set(re.findall(r"app\.cli ([a-z-]+)", f.read_text()))

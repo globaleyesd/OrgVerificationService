@@ -1,5 +1,6 @@
-"""The AI model behind one small interface. anthropic: the public API (local runs). bedrock: Amazon Bedrock
-through the server's IAM role (the AWS setup), so no API key is ever stored. local: an open model served by
+"""The AI model behind one small interface. anthropic: the public API (the key is in secrets.local.yaml on your
+machine, or in the private credentials store on the AWS server). bedrock: Amazon Bedrock through the server's
+IAM role, so no API key is needed. local: an open model served by
 Ollama on this machine (the `ollama` service in docker-compose.yml), so no key and no per-question fee."""
 from __future__ import annotations
 
@@ -126,6 +127,19 @@ class NoKeyClient:
         raise LlmNotConfigured("no API key is set")
 
 
+LLM_KEY_RECORD = "llm_api_key"
+
+
+def use_stored_key(cfg: Config, store) -> None:
+    """On the AWS server the Anthropic key is not in a file: `app.cli set-llm-key` saves it, on the server, in the
+    private credentials store. Use it when secrets.local.yaml has none."""
+    if cfg.llm.provider != "anthropic" or has_llm_key(cfg):
+        return
+    rec = store.read(LLM_KEY_RECORD)
+    if rec and isinstance(rec.get("api_key"), str):
+        cfg.secrets.llm.api_key = rec["api_key"]
+
+
 def make_llm(cfg: Config):
     if cfg.llm.provider == "bedrock":
         client = BedrockClient()
@@ -133,7 +147,7 @@ def make_llm(cfg: Config):
         from .answering import ANSWER_SCHEMA
         client = OllamaClient(cfg.llm.local_url, schema=ANSWER_SCHEMA)
     elif not has_llm_key(cfg):
-        log.warning("No llm.api_key in secrets.local.yaml: the app runs, but questions are turned off")
+        log.warning("No Anthropic API key (secrets.local.yaml, or app.cli set-llm-key on AWS): the app runs, but questions are turned off")
         return NoKeyClient()
     else:
         client = AnthropicClient(cfg.secrets.llm.api_key)
