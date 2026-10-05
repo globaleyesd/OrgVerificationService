@@ -315,6 +315,13 @@ class PowerLevelTemplateTests(TemplateSecurityTests):
                 self.assertTrue(all("${ProjectName}-*" in r["!Sub"] for r in x["Resource"]))
 
 
+class NoLateActionsTests(TemplateSecurityTests):
+    def test_background_power_requests_are_never_retried(self):
+        c = self.res["PowerNeverRetries"]["Properties"]
+        self.assertEqual((c["MaximumRetryAttempts"], c["MaximumEventAgeInSeconds"]), (0, 60))
+        self.assertEqual(c["FunctionName"], {"!Ref": "PowerFunction"})
+
+
 class ZeroMeansUnreachableTests(TemplateSecurityTests):
     def test_at_zero_the_site_answers_nothing(self):
         # Stopped means stopped: no page, no API, no status at the site address. Only the Control Center answers.

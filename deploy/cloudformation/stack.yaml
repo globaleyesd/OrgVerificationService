@@ -808,6 +808,13 @@ Resources:
                   return {"ok": False, "detail": str(e)}
 
   # ------------------------------------------------------------------ optional: working-hours schedule
+  PowerNeverRetries:      # a Stop or Turn on that fails or times out is never retried later on its own
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref PowerFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60           # a background request older than a minute is dropped, never run late
   SchedulerRole:
     Type: AWS::IAM::Role
     Condition: ScheduleOn
