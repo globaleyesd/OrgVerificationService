@@ -326,10 +326,10 @@ def aws_cost_sheet(cfg: Config) -> dict:
     price = cfg.costs.llm_prices_per_mtok.get(model)
     if cfg.llm.provider != "local" and price and any(price):
         per_q = (3000 * price[0] + 300 * price[1]) / 1e6          # about 3,000 tokens in and 300 out per question
-        rows.append({"name": f"AI answers ({model})", "monthly_usd": None, "usage": f"about ${per_q:.3f} per question",
+        rows.append({"name": "LLM inference API", "monthly_usd": None, "usage": f"about ${per_q:.3f} per question",
                      "billed_at": ["running"], "what": "Only when someone asks a question"})
     else:   # a local model can't run on the small AWS server: there the answers come from Bedrock, per question
-        rows.append({"name": "AI answers (Amazon Bedrock)", "monthly_usd": None, "usage": "per question; set llm.model_answer to a Bedrock model to price it",
+        rows.append({"name": "LLM inference API", "monthly_usd": None, "usage": "per question; set llm.model_answer to a Bedrock model to price it",
                      "billed_at": ["running"], "what": "Only when someone asks a question"})
     services = [dict(x, monthly_usd=round(x["monthly_usd"], 2)) if x["monthly_usd"] is not None else x
                 for x in rows if x["monthly_usd"] is None or x["monthly_usd"] >= 0.005]

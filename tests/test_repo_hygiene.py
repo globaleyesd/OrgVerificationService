@@ -245,8 +245,8 @@ class ControlFunctionTemplateTests(TemplateSecurityTests):
             self.assertEqual((e["ResponseCode"], e["ResponsePagePath"], e["ErrorCachingMinTTL"]), (503, "/offline.json", 0))
         self.assertEqual(json.loads((ROOT / "app" / "web" / "offline.json").read_text()), {"detail": "Service offline", "offline": True})
 
-    def test_function_logs_are_kept_only_briefly(self):
-        self.assertLessEqual(self.res["ControlLogGroup"]["Properties"]["RetentionInDays"], 14)
+    def test_function_logs_are_kept_three_months_then_deleted(self):
+        self.assertEqual(self.res["ControlLogGroup"]["Properties"]["RetentionInDays"], 90)   # not forever
 
     def test_server_runs_without_its_own_switch_on_aws(self):
         compose = yaml.safe_load((ROOT / "docker-compose.aws.yml").read_text())
@@ -313,6 +313,31 @@ class PowerLevelTemplateTests(TemplateSecurityTests):
             self.assertEqual([a for a in iam if a != "iam:PassRole" and not a.startswith(("iam:Get", "iam:List"))], [])
             if any(a.startswith(("iam:Get", "iam:List")) for a in iam):
                 self.assertTrue(all("${ProjectName}-*" in r["!Sub"] for r in x["Resource"]))
+
+
+class LogTests(TemplateSecurityTests):
+    def test_logs_outlive_the_server_for_three_months_and_the_control_center_is_told_where(self):
+        g = self.res["AppLogGroup"]
+        self.assertNotIn("Condition", g)                                  # not removed at zero
+        self.assertEqual(g["Properties"]["RetentionInDays"], 90)
+        for name in ("PowerLogGroup", "ControlLogGroup"):
+            self.assertEqual(self.res[name]["Properties"]["RetentionInDays"], 90)
+        out = self.t["Outputs"]["LogSources"]["Value"]["!Sub"]
+        self.assertIn('"service":"app"', out); self.assertIn("/projects/${ProjectName}/app", out)
+
+    def test_the_server_may_only_write_its_own_log_group(self):
+        stmts = self.res["ServerRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        logs = [s for s in stmts if s.get("Sid") == "ShipContainerLogs"][0]
+        self.assertEqual(sorted(logs["Action"]), ["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"])
+        self.assertEqual(logs["Resource"][0], {"!GetAtt": "AppLogGroup.Arn"})
+
+    def test_aws_containers_log_to_cloudwatch(self):
+        import yaml
+        c = yaml.safe_load((ROOT / "docker-compose.aws.yml").read_text())
+        for svc, stream in (("api", "api"), ("db", "db")):
+            lg = c["services"][svc]["logging"]
+            self.assertEqual(lg["driver"], "awslogs")
+            self.assertEqual((lg["options"]["awslogs-group"], lg["options"]["awslogs-stream"]), ("/projects/kb-verifier/app", stream))
 
 
 class SafeBackupTests(TemplateSecurityTests):

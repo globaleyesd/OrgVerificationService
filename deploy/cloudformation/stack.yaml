@@ -386,6 +386,10 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Sid: ShipContainerLogs             # the Docker awslogs driver: this project's log group only
+                Effect: Allow
+                Action: ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams']
+                Resource: [!GetAtt AppLogGroup.Arn, !Sub '${AppLogGroup.Arn}:log-stream:*']
               - Sid: CredentialsList
                 Effect: Allow
                 Action: 's3:ListBucket'
@@ -517,11 +521,17 @@ Resources:
   # through CloudFront (/control/*), which signs its requests (origin access control).
   # COST: a few invocations a day stay inside the Lambda free tier; logs are kept 14 days. The source is deploy/lambda/control.py
   # and a test keeps this inline copy identical to it.
+  AppLogGroup:            # the server's container logs (api, db): kept after Stop, read by the Control Center
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/projects/${ProjectName}/app'
+      RetentionInDays: 90                     # COST: a small app stays inside CloudWatch's free tier
+      Tags: [{Key: Project, Value: !Ref ProjectName}]
   ControlLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${ProjectName}-control'
-      RetentionInDays: 14
+      RetentionInDays: 90
   ControlRole:
     Type: AWS::IAM::Role
     Properties:
@@ -622,7 +632,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${ProjectName}-power'
-      RetentionInDays: 14
+      RetentionInDays: 90
   PowerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -886,6 +896,9 @@ Resources:
           Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetEmail}]
 
 Outputs:
+  LogSources:
+    Description: Where the Control Center reads this project's logs (service name -> log group; app streams are named after the container).
+    Value: !Sub '[{"service":"app","group":"/projects/${ProjectName}/app"},{"service":"power","group":"/aws/lambda/${ProjectName}-power"},{"service":"status","group":"/aws/lambda/${ProjectName}-control"}]'
   TemplateVersion:
     Description: The commit the stored template came from.
     Value: !Ref TemplateVersion

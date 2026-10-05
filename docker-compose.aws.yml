@@ -26,7 +26,9 @@ services:
     secrets: [db_password]
     mem_limit: 900m
     restart: unless-stopped
-    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    logging:                                         # to CloudWatch (kept 90 days, survives Stop); `docker logs` still works
+      driver: awslogs
+      options: { awslogs-region: "${AWS_REGION_NAME}", awslogs-group: "/projects/kb-verifier/app", awslogs-stream: "api" }
   db:
     image: pgvector/pgvector:pg16
     command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=20"]
@@ -43,7 +45,9 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+    logging:
+      driver: awslogs
+      options: { awslogs-region: "${AWS_REGION_NAME}", awslogs-group: "/projects/kb-verifier/app", awslogs-stream: "db" }
 secrets:
   db_password:
     file: ./db_password

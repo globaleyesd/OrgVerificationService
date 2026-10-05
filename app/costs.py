@@ -9,6 +9,7 @@ Not included: CloudFront and data transfer, request charges, tax, and anything o
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -96,6 +97,17 @@ def estimate(start: datetime, end: datetime, usage: Usage, rates, llm_prices: di
 # Names of models that are paid per token (Anthropic API, Amazon Bedrock and its regional profiles). Anything else
 # without a price is taken to be a model run on your own hardware (Ollama).
 HOSTED_MODEL = re.compile(r"^(claude|anthropic\.|(us|eu|apac|global)\.|amazon\.|meta\.|mistral\.|cohere\.|ai21\.|deepseek\.|openai\.)")
+
+
+def ai_usage_line(model: str, tokens_in: int, tokens_out: int, prices: dict, kind: str) -> str | None:
+    """The AI_USAGE log line for one AI call (None when nothing was used, e.g. a cached answer). The Control Center
+    reads these from the logs to show the Claude API cost live; the database keeps its own record as before."""
+    if not (tokens_in or tokens_out):
+        return None
+    m = ai_costs({model: (int(tokens_in), int(tokens_out))}, prices)["models"][0]
+    return "AI_USAGE " + json.dumps({"model": model, "input_tokens": m["input_tokens"], "output_tokens": m["output_tokens"],
+                                     "usd": m["usd"], "local": m["local"], "priced": m["priced"], "kind": kind},
+                                    separators=(",", ":"))
 
 
 def ai_costs(llm_tokens: dict, prices: dict) -> dict:
