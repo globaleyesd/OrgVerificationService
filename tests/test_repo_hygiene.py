@@ -308,7 +308,11 @@ class PowerLevelTemplateTests(TemplateSecurityTests):
         for x in flat:
             actions = x["Action"] if isinstance(x["Action"], list) else [x["Action"]]
             self.assertNotIn("*", actions)
-            self.assertEqual([a for a in actions if a.startswith("iam:")], [] if "PassRole" not in str(actions) else ["iam:PassRole"])
+            iam = [a for a in actions if a.startswith("iam:")]
+            # no IAM changes: only handing the server its role, and reading the stack's own roles
+            self.assertEqual([a for a in iam if a != "iam:PassRole" and not a.startswith(("iam:Get", "iam:List"))], [])
+            if any(a.startswith(("iam:Get", "iam:List")) for a in iam):
+                self.assertTrue(all("${ProjectName}-*" in r["!Sub"] for r in x["Resource"]))
 
 
 class PageRoutingTests(TemplateSecurityTests):

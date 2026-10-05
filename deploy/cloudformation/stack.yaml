@@ -668,14 +668,34 @@ Resources:
                 Effect: Allow
                 Action: ['cloudfront:Get*', 'cloudfront:Describe*', 'cloudfront:List*']
                 Resource: '*'
-              - Sid: ReadTheStatusFunctionsAddress
+              - Sid: ReadTheStacksFunctions        # CloudFormation re-reads every resource the template refers to
                 Effect: Allow
-                Action: ['lambda:GetFunction', 'lambda:GetFunctionConfiguration', 'lambda:GetFunctionUrlConfig', 'lambda:GetPolicy']
+                Action: ['lambda:Get*', 'lambda:List*']
                 Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectName}-*'
               - Sid: ReadBucketSettingsNotFiles   # bucket-level reads only (the ARNs have no /*): no document is readable
                 Effect: Allow
                 Action: 's3:Get*'
-                Resource: [!GetAtt UiBucket.Arn, !GetAtt DataBucket.Arn]
+                Resource: [!GetAtt UiBucket.Arn, !GetAtt DataBucket.Arn, !GetAtt CredsBucket.Arn]
+              - {Sid: ReadLogGroups, Effect: Allow, Action: 'logs:DescribeLogGroups', Resource: '*'}   # cannot be narrowed
+              - Sid: ReadTheStacksLogGroupTags
+                Effect: Allow
+                Action: ['logs:ListTagsForResource', 'logs:ListTagsLogGroup']
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-*'
+              - Sid: ReadTheStacksRoles
+                Effect: Allow
+                Action: ['iam:GetRole', 'iam:GetRolePolicy', 'iam:ListRolePolicies', 'iam:ListAttachedRolePolicies',
+                         'iam:GetInstanceProfile', 'iam:ListInstanceProfilesForRole']
+                Resource: [!Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-*',
+                           !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-*']
+              - Sid: ReadTheImageRepository
+                Effect: Allow
+                Action: ['ecr:DescribeRepositories', 'ecr:GetLifecyclePolicy', 'ecr:GetRepositoryPolicy', 'ecr:ListTagsForResource']
+                Resource: !GetAtt Repository.Arn
+              - Sid: UseTheDefaultDiskKeyThroughEc2Only   # the new server's encrypted disk (AWS's own aws/ebs key)
+                Effect: Allow
+                Action: ['kms:CreateGrant', 'kms:Decrypt', 'kms:DescribeKey', 'kms:GenerateDataKeyWithoutPlaintext', 'kms:ReEncrypt*']
+                Resource: '*'
+                Condition: {StringEquals: {'kms:ViaService': !Sub 'ec2.${AWS::Region}.amazonaws.com'}}
               - !If
                 - ScheduleOn
                 - Sid: WorkingHoursSchedules
