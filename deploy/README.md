@@ -125,7 +125,7 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 6. **Minimum TLS version** cannot be enforced on the default CloudFront address (needs a custom domain and certificate).
 7. The **cost meters** and the **heartbeat** have not run against a real database yet.
 8. The **service-switch lockout is global**, so wrong guesses can briefly lock out the owner.
-9. The Docker Compose plugin is downloaded from GitHub at server start with a pinned version; verify it fits your policy.
+9. The Docker Compose plugin is downloaded from GitHub at server start (pinned version, checked against its published SHA-256; the start-up stops if it does not match).
 10. **Credentials in S3, not Secrets Manager.** Cheaper and simpler, but no automatic rotation and no per-secret audit trail unless you pay for CloudTrail data events. The cookie-signing key is a real secret (not a hash): whoever holds it can forge sign-ins. Session tokens cannot be revoked before they expire.
 11. **Demo sign-in is passwordless.** While `ui.demo_mode` is true, anyone who reaches the site with the service switch on can click Eileen and see everything. Keep the switch off when not demoing; set `ui.demo_mode: false` before real use.
 12. **Real answers are new and unproven on AWS.** The server downloads its search model (about 130 MB) the first time a document is added, so the first upload after deploy is slow and needs outbound internet. Original files go to the documents bucket through the server's role. The Postgres code has never run against a database until your first local run.
