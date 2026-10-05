@@ -34,6 +34,18 @@ class LlmResult:
     tokens_out: int
 
 
+def _provider_reason(e) -> str:
+    """The provider's own explanation of a refused call (for example "not scoped to a workspace" or "credit balance is
+    too low"), for the logs. Short, one line, and with anything that looks like a key removed."""
+    try:
+        err = json.loads(e.read() or b"{}").get("error", {})
+    except (ValueError, OSError, AttributeError):
+        return ""
+    import re
+    text = re.sub(r"sk-ant-[A-Za-z0-9_-]+", "[key]", " ".join(f"{err.get('type', '')}: {err.get('message', '')}".split()))
+    return (" (" + text[:240] + ")") if err else ""
+
+
 class AnthropicClient:
     URL = "https://api.anthropic.com/v1/messages"
 
@@ -49,7 +61,7 @@ class AnthropicClient:
             with self.opener(req, timeout=self.timeout) as r:
                 j = json.loads(r.read())
         except urllib.error.HTTPError as e:
-            raise LlmError(f"The AI service answered with HTTP {e.code}") from None   # never include the request (it holds the key)
+            raise LlmError(f"The AI service answered with HTTP {e.code}{_provider_reason(e)}") from None   # never the request (it holds the key)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError):
             raise LlmError("Could not reach the AI service") from None
         text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")

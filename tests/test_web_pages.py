@@ -97,5 +97,20 @@ class PageTests(unittest.TestCase):
             self.assertNotIn(gone, js)
 
 
+class OneFailedRequestNeverHidesTheSiteTests(unittest.TestCase):
+    def test_the_offline_screen_needs_the_server_to_really_be_off(self):
+        js = (WEB / "common.js").read_text(encoding="utf-8")
+        api = js[js.index("async function api("):js.index("async function getStatus(")]
+        i, j = api.index("if (await serverRunning())"), api.index("showOffline(offMessage())")
+        self.assertLess(i, j)                                   # first ask whether the server is really off
+        self.assertIn("throw new Error(\"The server didn't answer this request in time. Please try again.\")", api)
+        self.assertIn('fetch("/control/status")', js)
+
+    def test_ai_errors_are_not_turned_into_the_offline_screen(self):
+        main = (WEB.parent / "main.py").read_text(encoding="utf-8")
+        i = main.index('log.warning("AI service problem: %s", e)')
+        self.assertIn("status_code=503", main[i:i + 400]); self.assertNotIn("status_code=502", main[i:i + 400])
+
+
 if __name__ == "__main__":
     unittest.main()

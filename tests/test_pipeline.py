@@ -502,6 +502,17 @@ class RepoTests(unittest.TestCase):
 
 
 class ClientTests(unittest.TestCase):
+    def test_a_refused_call_says_why_in_the_logs_but_never_shows_the_key(self):
+        import io, urllib.error
+        body = json.dumps({"error": {"type": "invalid_request_error", "message": "This API key is not scoped to a workspace (sk-ant-api03-SECRET)"}}).encode()
+        def opener(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+        with self.assertRaises(LlmError) as cm:
+            AnthropicClient("sk-ant-api03-SECRET", opener=opener).complete("s", "u", "m", 10)
+        msg = str(cm.exception)
+        self.assertIn("HTTP 400", msg); self.assertIn("not scoped to a workspace", msg)
+        self.assertNotIn("SECRET", msg)
+
     def test_anthropic_request_shape_and_key_only_in_the_header(self):
         seen = {}
 

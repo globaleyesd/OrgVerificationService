@@ -354,7 +354,7 @@ class MainWiringTests(unittest.TestCase):
                 raise LlmError("upstream secret detail")
         self.use_services(llm=Boom())
         self.upload({"text": "The license ends in June 2027."})
-        err = self.raises(502, self.ask, "when does the license end", self.as_user("eileen"))
+        err = self.raises(503, self.ask, "when does the license end", self.as_user("eileen"))
         self.assertNotIn("secret", err.detail)
 
         from app.llm import NoKeyClient

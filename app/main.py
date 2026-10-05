@@ -314,7 +314,9 @@ def _problem(e: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail="Questions are turned off: no AI key is set. Add llm.api_key to secrets.local.yaml (on AWS: set-llm-key) and restart.")
     if isinstance(e, LlmError):
         log.warning("AI service problem: %s", e)
-        return HTTPException(status_code=502, detail="The AI service is unavailable right now")
+        # 503 without "offline": the page shows this message. (A 502 would be turned into the "Service offline" screen
+        # by CloudFront, which hid the real problem.)
+        return HTTPException(status_code=503, detail="The AI service refused the request. The reason is in the project's logs.")
     log.warning("request failed: %s", type(e).__name__)
     return HTTPException(status_code=503, detail="This is unavailable right now. Please try again.")
 

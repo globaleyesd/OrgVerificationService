@@ -91,9 +91,22 @@ async function api(path, o) {
   if (r.status === 401) { goSignIn(); throw new Error("offline"); }   // signed out or session expired: already handled
   if (r.status === 503) {
     let j = null; try { j = await r.clone().json(); } catch (e) {}
-    if (j && j.offline) { showOffline(offMessage()); throw new Error("offline"); }
+    if (j && j.offline) {
+      // On AWS, CloudFront answers "offline" for ANY request the server didn't answer (502/504), so one failed or slow
+      // request looked like the whole site going away. The offline screen is only for a server that is really off;
+      // otherwise this one request failed, the page stays, and the caller shows the message.
+      if (await serverRunning()) throw new Error("The server didn't answer this request in time. Please try again.");
+      showOffline(offMessage()); throw new Error("offline");
+    }
   }
   return r;
+}
+async function serverRunning() {
+  try {   // AWS: the status function always answers, and says whether the server is running
+    const c = await fetch("/control/status");
+    if (c.ok) { const s = await c.json(); return s.state === "running"; }
+  } catch (e) {}
+  try { const s = await fetch(API + "/service/status"); return s.ok && (await s.json()).on === true; } catch (e) { return false; }
 }
 async function getStatus() {
   try {
