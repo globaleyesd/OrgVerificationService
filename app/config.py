@@ -340,8 +340,8 @@ def validate(cfg: Config) -> None:
         if not re.fullmatch(r"([a-z0-9_-]+/)*", cr.s3_prefix or ""):
             raise ConfigError("credentials.s3_prefix: empty, or folders like 'creds/'")
     sw = cfg.service_switch
-    if sw.mode not in ("local", "aws"):
-        raise ConfigError("service_switch.mode: must be 'local' or 'aws'")
+    if sw.mode not in ("local", "aws", "control-center"):
+        raise ConfigError("service_switch.mode: must be 'local', 'aws' or 'control-center'")
     if sw.auto_off_hours < 0 or sw.lockout_minutes < 0 or sw.max_failed_attempts < 1:
         raise ConfigError("service_switch: auto_off_hours and lockout_minutes must be >= 0, max_failed_attempts >= 1")
     if cfg.costs.heartbeat_seconds < 0 or cfg.costs.max_range_days < 1:

@@ -1,6 +1,7 @@
 """The containers setting: Docker Desktop or Rancher Desktop (moby or containerd), and the commands built from it."""
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
@@ -87,16 +88,35 @@ class ContainersScriptTests(unittest.TestCase):
         return code, out.getvalue()
 
     def test_dry_run_prints_the_command_for_the_configured_tool(self):
-        code, out = self.run_script("service", "on", "--dry-run")
+        code, out = self.run_script("exec", "api", "python", "-m", "app.cli", "list-users", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("compose -f docker-compose.yml", out); self.assertIn("exec api python -m app.cli service on", out)
+        self.assertIn("compose -f docker-compose.yml", out); self.assertIn("exec api python -m app.cli list-users", out)
         code, out = self.run_script("model", "qwen3:4b", "--dry-run")
         self.assertIn("exec ollama ollama pull qwen3:4b", out)
 
-    def test_bad_arguments_are_explained(self):
-        self.assertEqual(self.run_script("service", "sideways")[0], 2)
-        self.assertEqual(self.run_script("exec")[0], 2)
+    def test_only_the_control_center_starts_or_stops_it(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CONTROL_CENTER_LAUNCH", None)
+            for cmd in ("up", "down", "stop", "start", "restart"):
+                with mock.patch("subprocess.call", side_effect=AssertionError("must not run")):
+                    code, out = self.run_script(cmd)
+                self.assertEqual(code, 1, cmd)
+                self.assertIn("only from the Control Center", out)
+            os.environ["CONTROL_CENTER_LAUNCH"] = "control-center"          # what the Control Center's adapter sets
+            self.assertEqual(self.run_script("up", "--dry-run")[0], 0)
+        self.assertNotIn("CONTROL_CENTER_LAUNCH", os.environ)               # nothing leaks into the caller
 
+    def test_the_compose_file_refuses_to_run_without_the_control_center(self):
+        compose = (ROOT / "docker-compose.yml").read_text()
+        self.assertIn("${CONTROL_CENTER_LAUNCH:?", compose)
+        self.assertNotIn("unless-stopped", compose)                          # no coming back by itself after a reboot
+        self.assertIn("APP_SERVICE_SWITCH_MODE: control-center", compose)
+
+    def test_bad_arguments_are_explained(self):
+        self.assertEqual(self.run_script("exec")[0], 2)
+        with self.assertRaises(SystemExit):
+            self.run_script("service", "on")                                 # gone: the Control Center is the switch
 
 if __name__ == "__main__":
     unittest.main()

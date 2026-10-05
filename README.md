@@ -27,10 +27,11 @@ Requirements: Python 3.12+ and Docker Desktop or Rancher Desktop (see [docs/CONT
 ```bash
 cp secrets.example.yaml secrets.local.yaml   # then edit with your own values
 python scripts/init_local.py                 # creates a random DB password, the creds/ and data/ folders
-docker compose up --build
 ```
 
-Open `http://localhost:8000/` (or go straight to `/ask` or `/add`). Add `?mock=1` to preview the pages with sample answers. The service starts **off**: turn it on with `docker compose exec api python -m app.cli service on` (asks for the switch password), then create the demo users with `python -m app.cli create-demo-users` (see [docs/COMMANDS.md](docs/COMMANDS.md) and [docs/SERVICE_SWITCH_AND_COSTS.md](docs/SERVICE_SWITCH_AND_COSTS.md)).
+Then start it from the dev Control Center (http://localhost:8700, in the AWSControlPanel project): **Turn on**. The Control Center is the only way to start or stop OKVS, locally and on AWS: direct `docker compose` commands refuse to run.
+
+Open `http://localhost:8000/` (or go straight to `/ask` or `/add`). Add `?mock=1` to preview the pages with sample answers. Create the demo users with `python -m app.cli create-demo-users` (see [docs/COMMANDS.md](docs/COMMANDS.md) and [docs/SERVICE_SWITCH_AND_COSTS.md](docs/SERVICE_SWITCH_AND_COSTS.md)).
 
 Run the tests (no Docker needed):
 

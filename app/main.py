@@ -49,8 +49,9 @@ try:
 except (ConfigError, CredentialStoreError) as e:
     raise SystemExit(f"Start-up error: {e}")
 
-# "local": this app has its own on/off switch. "aws": the AWS control function is the only switch (it starts and
-# stops the server), so "on" simply means this server is running and the app has no switch of its own.
+# "local": this app has its own on/off switch (tests and bare runs). "aws" and "control-center" (Docker on this machine):
+# the Control Center is the only switch (it starts and stops the containers or the server), so "on" simply means this
+# app is running and it has no switch of its own.
 SWITCH_LOCAL = cfg.service_switch.mode == "local"
 
 users = UserStore(store, cfg.clearance.levels, min_password_length=cfg.auth.password_min_length,
@@ -187,7 +188,7 @@ def _minutes(seconds_left: float) -> int:
 
 def _switch_action(action, body: PasswordBody) -> dict:
     if not SWITCH_LOCAL:
-        raise HTTPException(status_code=404, detail="The service switch is handled by the AWS control service")
+        raise HTTPException(status_code=404, detail="Turn the service on or off from the Control Center")
     try:
         action(body.password)
     except WrongPassword:

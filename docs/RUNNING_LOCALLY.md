@@ -13,18 +13,21 @@
 - Optional: copy `config.local.example.yaml` to `config.local.yaml` for your display name and colours
 
 ## Start
-- `docker compose up --build` (the first build takes a few minutes)
-  - Linux: `APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build`
-- Open `http://localhost:8000/` in Chrome or Firefox (Safari rejects secure cookies on plain http://localhost)
-- The service starts **off**: turn it on with `docker compose exec api python -m app.cli service on` and the demo switch password
+- Register this folder once with the dev Control Center (in the AWSControlPanel project):
+  `python deploy/cc.py register-local --path ../OrgVerificationService --id kb-verifier --name OKVS`
+- Open the dev Control Center (http://localhost:8700) and press **Turn on**. It is the only way to start or stop OKVS:
+  `docker compose up` and `python scripts/containers.py up` refuse to run on their own. The first start builds the image
+  (a few minutes).
+- Open `http://localhost:8000/` in Chrome or Firefox (Safari rejects secure cookies on plain http://localhost). It is on
+  as soon as it is running: there is no separate switch.
 
 ## Load the demo data
 - Create the two demo users (random passwords, shown once; the demo sign-in page doesn't need them):
-  - `docker compose run --rm api python -m app.cli create-demo-users`
+  - `python scripts/containers.py exec api python -m app.cli create-demo-users`
 - Read the synthetic sample documents in (the first one downloads the search model, give it a minute):
-  - `docker compose run --rm api python -m app.cli ingest /srv/samples/employee --level employee`
-  - `docker compose run --rm api python -m app.cli ingest /srv/samples/super`
-- Check what is stored: `docker compose run --rm api python -m app.cli list-documents`
+  - `python scripts/containers.py exec api python -m app.cli ingest /srv/samples/employee --level employee`
+  - `python scripts/containers.py exec api python -m app.cli ingest /srv/samples/super`
+- Check what is stored: `python scripts/containers.py exec api python -m app.cli list-documents`
 
 ## Walk through the demo
 - `/ask`: click **Eileen**, ask "When does the reporting platform license expire?" and click the `[1]` markers to see the highlighted passage

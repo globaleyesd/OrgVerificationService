@@ -1,4 +1,4 @@
-"""End-to-end check of a RUNNING local stack (docker compose up). Standard library only.
+"""End-to-end check of a RUNNING local stack (started from the Control Center). Standard library only.
 
     python scripts/smoke_local.py [--base http://localhost:8000]
 

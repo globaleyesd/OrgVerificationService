@@ -9,7 +9,7 @@ A password-protected on/off switch for the whole service. Locally it gates the a
 | **Off** (the starting state) | Every API answers `503` with `{"detail": "Service offline", "offline": true}`. The page shows a **Service offline** screen saying where to turn it on. |
 | **On** | Everything works. |
 
-The pages have **no on/off button**. Locally: `python -m app.cli service on|off|status` (asks for the switch password, same lockout). On AWS: the **Control Center** (a separate project) turns projects on, off and down to zero; every action there is password-checked too.
+The pages have **no on/off button**, and nothing else turns OKVS on or off: the **Control Center** (a separate project) does it, locally and on AWS, and every action there is password-checked. Locally it starts and stops the Docker containers (direct `docker compose` commands refuse to run); on AWS it starts, stops and takes the server to zero. While it runs it is on. The switch described below remains only for running the app outside Docker (for example the tests).
 
 ### What stays reachable while off
 Only four paths: `/api/health` (container health check), `/api/service/status` (so the page knows the state and its branding), and `/api/service/on` and `/api/service/off` (the switch itself). Everything else under `/api` is refused. The rule lives in `app/gate.py` and is covered by tests, including look-alike paths such as `/api/service/status/extra`.
@@ -25,7 +25,7 @@ Only four paths: `/api/health` (container health check), `/api/service/status` (
 - With `ui.demo_mode: false` the app **refuses to start** if no password was set, or if it is still the demo one. This is deliberate: the demo password sits in public code, so it must never be in force on a real system.
 - Set your own (minimum length is `auth.password_min_length`):
   - Local: `python -m app.cli set-switch-password`
-  - Docker: `docker compose run --rm api python -m app.cli set-switch-password`
+  - Docker: `python scripts/containers.py exec api python -m app.cli set-switch-password`
   - On the AWS server, open a shell with SSM Session Manager (no SSH needed), then run the same command through `docker compose -f docker-compose.aws.yml run --rm api ...` from `/opt/app`.
 
 ### State and auto-off

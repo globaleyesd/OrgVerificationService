@@ -14,27 +14,26 @@ Run everything from the project folder (the one containing `config.yaml`). The V
   - `python scripts/init_local.py`
 
 ## Run it locally
-- Start (Docker):
-  - Mac / Windows: `docker compose up --build`
-  - Linux (so the `creds/` and `data/` folders are writable): `APP_UID=$(id -u) APP_GID=$(id -g) docker compose up --build`
+- Start and stop: **only from the Control Center** (http://localhost:8700 for this machine). Direct `docker compose` and
+  `python scripts/containers.py up/down/stop/start/restart` refuse to run.
 - Open in a browser:
   - `http://localhost:8000/` (launcher)
   - `http://localhost:8000/ask` (role-checked)
   - `http://localhost:8000/add` (any signed-in user; every page sends you to `/signin` first)
-- Turn the service on: it starts **off**; enter the switch password on the offline screen
+- It is on whenever it runs: there is no separate switch.
 - Load the demo documents (synthetic, in `samples/`; the first run downloads the search model):
-  - `docker compose run --rm api python -m app.cli ingest /srv/samples/employee --level employee`
-  - `docker compose run --rm api python -m app.cli ingest /srv/samples/super`
+  - `python scripts/containers.py exec api python -m app.cli ingest /srv/samples/employee --level employee`
+  - `python scripts/containers.py exec api python -m app.cli ingest /srv/samples/super`
   - Your own files or folders work the same way: `... ingest /srv/samples/PATH [--level employee]` (mount them under `samples/`)
   - List: `... list-documents`. Mark one readable by Employees: `... set-document-level DOC_ID employee`
-  - After a change to how files are read or split: `docker compose exec api python -m app.cli reindex` (reads every stored original again; ids and levels stay)
+  - After a change to how files are read or split: `python scripts/containers.py exec api python -m app.cli reindex` (reads every stored original again; ids and levels stay)
 - Measure answer quality and speed on your own question set (`data/eval_questions.json`, see the script's header):
-  - `docker compose exec -T api python - --model qwen3:4b < scripts/eval_answers.py`
+  - `python scripts/containers.py exec -T api python - --model qwen3:4b < scripts/eval_answers.py`
 - Check the whole local stack end to end (service on, demo users created, samples loaded): `python scripts/smoke_local.py`
 - Step-by-step walkthrough: [RUNNING_LOCALLY.md](RUNNING_LOCALLY.md)
 - Create the two demo users (random passwords, shown **once**; save them in a password manager):
   - `python -m app.cli create-demo-users`
-  - This writes to the local `creds/` folder, which the container reads too. Or inside Docker: `docker compose run --rm api python -m app.cli create-demo-users`
+  - This writes to the local `creds/` folder, which the container reads too. Or inside Docker: `python scripts/containers.py exec api python -m app.cli create-demo-users`
 - Sign in at `http://localhost:8000/ask` (in demo mode you just click a user; no password to type):
   - **Eileen** = Super (sees everything and the Costs button)
   - **AllMinusEileen** = Employee (everyone-but-Eileen view)
@@ -44,12 +43,10 @@ Run everything from the project folder (the one containing `config.yaml`). The V
   - Or with the server running: `http://localhost:8000/ask?mock=1`
   - Extras: add `&as=employee` for the Employee view, `&state=off` to start on the offline screen
 - Follow the logs: `docker compose logs -f api`
-- Stop: `docker compose down`
-- Stop and delete the local database: `docker compose down -v`
-- Turn the service on or off (the pages have no button for it any more; asks for the switch password):
-  - `docker compose exec api python -m app.cli service on` (or `off`, or `status`)
+- Stop: **Stop** in the Control Center (removes the containers; the database and the model stay in their volumes).
+- Is it on: `python scripts/containers.py exec api python -m app.cli service status`
 - Set your own switch password (needed before `ui.demo_mode: false`):
-  - `python -m app.cli set-switch-password`  (or `docker compose run --rm api python -m app.cli set-switch-password`)
+  - `python -m app.cli set-switch-password`  (or `python scripts/containers.py exec api python -m app.cli set-switch-password`)
 - Manage users:
   - List (names and roles only): `python -m app.cli list-users`
   - Set a password yourself (prompted, not echoed): `python -m app.cli set-user-password eileen`
@@ -93,7 +90,7 @@ Run everything from the project folder (the one containing `config.yaml`). The V
   - "Deploy: everything"
   - "Deploy: AWS stack only" / "build and push image" / "upload web page" / "upload non-secret config" / "update server"
   - "Deploy: show site address and names"
-  - "Local: run tests" / "Local: start with Docker"
+  - "Local: run tests" (there is no task that starts OKVS: the Control Center does that)
 
 ### Day to day
 - Changed only the pages (`app/web`): `python deploy/deploy.py ui`

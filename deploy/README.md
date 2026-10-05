@@ -52,7 +52,7 @@ Run the tasks from **Terminal > Run Task** (or `python deploy/deploy.py <step>`;
 
 1. **Deploy: preview all steps (dry run)**: prints every command and runs nothing.
 2. **Deploy: everything**: stack, image, page, config, server update. The first stack creation takes around 10 minutes because of CloudFront.
-3. Run **Deploy: show site address and names**, open `SiteUrl`, enter the switch password to turn the service on, then create the demo users (below). The pages are at `SiteUrl/` (launcher), `SiteUrl/ask` (role-checked) and `SiteUrl/add` (any signed-in user). Every page sends you to `SiteUrl/signin` first.
+3. Run **Deploy: show site address and names**, open `SiteUrl` (turn the project on from the Control Center if it is off), then create the demo users (below). The pages are at `SiteUrl/` (launcher), `SiteUrl/ask` (role-checked) and `SiteUrl/add` (any signed-in user). Every page sends you to `SiteUrl/signin` first.
 
 On the first deploy the server starts before any image exists, so its start-up script reports "Image not pushed yet". That is expected: the `image`, `config` and `update` steps fix it.
 
@@ -68,7 +68,7 @@ then `sudo docker compose -f docker-compose.aws.yml --env-file .env restart api`
 the credentials bucket that only the server's role can read. It is never in a file on your machine, the template or git.
 
 ### Create the demo users (after the first deploy)
-The server must be running (turn the service on first). Open a shell on it with `aws ssm start-session --target INSTANCE_ID`, then from `/opt/app` run:
+The server must be running (Turn on in the Control Center). Open a shell on it with `aws ssm start-session --target INSTANCE_ID`, then from `/opt/app` run:
 `sudo docker compose -f docker-compose.aws.yml --env-file .env run --rm api python -m app.cli create-demo-users`
 It prints random passwords for **Eileen** (Super) and **AllMinusEileen** (Employee) once. Save them in a password manager. The accounts are written straight into the protected credentials bucket by the server's role; nothing is uploaded from your machine. If you use Session Manager session logging, prefer `set-user-password` (prompted, not echoed). Then open `SiteUrl/ask`: in demo mode you just click Eileen or AllMinusEileen (no password to type). The passwords are for the password form that replaces the picker when `ui.demo_mode` is false.
 
@@ -105,7 +105,7 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 - `Power` is set only by the adapter. Normal deploys keep its current value, so deploying while at zero stays at zero.
 - **The Control Center is the only way to turn the project on or off on AWS.** Nothing in this stack can start the server
   by itself: `/control/status` only tells the page the state, the app's own switch is off on AWS, and the power function
-  can be invoked only by the Control Center's role. Locally, `python -m app.cli service on|off` replaces the button.
+  can be invoked only by the Control Center's role. Locally too, only the (dev) Control Center starts and stops it.
 
 ## What is locked down
 - **Both buckets**: all four Block Public Access settings on, encrypted, versioned, requests over plain HTTP denied, no ACLs. The page bucket can be read only by this CloudFront distribution (origin access control). The documents bucket is kept if the stack is deleted.

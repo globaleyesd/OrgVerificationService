@@ -1,12 +1,11 @@
 """Run the local stack with the container tool chosen in config (containers.engine): Docker Desktop or Rancher Desktop.
 
     python scripts/containers.py check [--deploy]   # what is installed, what is missing, how to install it
-    python scripts/containers.py up [--build]       # start everything (app, database, AI model)
+    python scripts/containers.py up [--build]       # start everything: run by the Control Center only (it refuses otherwise)
     python scripts/containers.py down               # stop and remove the containers (data and models are kept)
     python scripts/containers.py stop|start|restart [service]
     python scripts/containers.py ps | logs [service] [-f]
     python scripts/containers.py exec <service> <command...>
-    python scripts/containers.py service on|off|status     # the app's own switch (asks for the switch password)
     python scripts/containers.py model <name>               # download a model for the local AI, e.g. qwen3:4b
     add --dry-run to print the command instead of running it
 
@@ -40,14 +39,14 @@ INSTALL = {   # Windows commands (winget comes with Windows 11); other systems: 
 }
 
 
-def run(cmd: list[str], dry: bool) -> int:
+def run(cmd: list[str], dry: bool, env: dict | None = None) -> int:
     print("$ " + " ".join(shlex.quote(c) for c in cmd))
     if dry:
         return 0
     if not shutil.which(cmd[0]):
         print(f"'{cmd[0]}' was not found. Run: python scripts/containers.py check")
         return 1
-    return subprocess.call(cmd, cwd=ROOT)
+    return subprocess.call(cmd, cwd=ROOT, env=env)
 
 
 def probe(cmd: list[str]) -> tuple[bool, str]:
@@ -100,9 +99,13 @@ def check(c, deploying: bool) -> int:
     return 1 if missing else 0
 
 
+LAUNCH_VAR = "CONTROL_CENTER_LAUNCH"                 # set by the Control Center's local adapter; docker-compose.yml requires it
+STARTS_OR_STOPS = ("up", "down", "stop", "start", "restart")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Run the local stack with Docker Desktop or Rancher Desktop")
-    ap.add_argument("command", choices=["check", "up", "down", "stop", "start", "restart", "ps", "logs", "exec", "service", "model"])
+    ap.add_argument("command", choices=["check", "up", "down", "stop", "start", "restart", "ps", "logs", "exec", "model"])
     ap.add_argument("rest", nargs=argparse.REMAINDER)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--build", action="store_true", help="up: rebuild the app image first")
@@ -118,25 +121,26 @@ def main(argv=None) -> int:
     dry = a.dry_run or "--dry-run" in a.rest
     if a.command == "check":
         return check(c, a.deploy or "--deploy" in rest)
+    if a.command in STARTS_OR_STOPS and not os.environ.get(LAUNCH_VAR) and not dry:
+        print("OKVS starts and stops only from the Control Center: open http://localhost:8700 (or the prod address) and use "
+              "Turn on / Stop there.")
+        return 1
+    env = dict(os.environ)
+    env.setdefault(LAUNCH_VAR, "maintenance")           # ps, logs, exec and model only work with what is already running
     if a.command == "up":
-        return run(ct.compose(c, "up", "-d", *(["--build"] if a.build or "--build" in rest else [])), dry)
+        return run(ct.compose(c, "up", "-d", *(["--build"] if a.build or "--build" in rest else [])), dry, env)
     if a.command in ("down", "stop", "start", "restart", "ps", "logs"):
-        return run(ct.compose(c, a.command, *rest), dry)
+        return run(ct.compose(c, a.command, *rest), dry, env)
     if a.command == "exec":
         if not rest:
             print("exec needs a service and a command, e.g. exec api python -m app.cli list-users")
             return 2
-        return run(ct.compose(c, "exec", *rest), dry)
-    if a.command == "service":
-        if rest not in (["on"], ["off"], ["status"]):
-            print("service needs on, off or status")
-            return 2
-        return run(ct.compose(c, "exec", "api", "python", "-m", "app.cli", "service", rest[0]), dry)
+        return run(ct.compose(c, "exec", *rest), dry, env)
     if a.command == "model":
         if len(rest) != 1:
             print("model needs one name, e.g. qwen3:4b")
             return 2
-        return run(ct.compose(c, "exec", "ollama", "ollama", "pull", rest[0]), dry)
+        return run(ct.compose(c, "exec", "ollama", "ollama", "pull", rest[0]), dry, env)
     return 2
 
 

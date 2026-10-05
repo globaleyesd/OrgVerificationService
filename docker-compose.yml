@@ -19,6 +19,9 @@ services:
       db: { condition: service_healthy }
       ollama: { condition: service_started }
     environment:
+      # Only the Control Center (its local adapter sets this) may start or stop OKVS: every other compose command stops here.
+      APP_LAUNCHED_BY: ${CONTROL_CENTER_LAUNCH:?OKVS starts and stops only from the Control Center (http://localhost:8700)}
+      APP_SERVICE_SWITCH_MODE: control-center   # no switch of its own: running containers = on
       APP_SECRETS: /run/secrets/app_secrets
       APP_CONFIG_LOCAL: /srv/config.local.yaml
     volumes:
@@ -28,12 +31,12 @@ services:
       - ./data:/srv/data                   # on/off state, original files and the search model (git-ignored)
       - ./samples:/srv/samples:ro          # synthetic demo documents for `app.cli ingest`
     secrets: [app_secrets, db_password]
-    restart: unless-stopped
+    restart: "no"                 # only the Control Center starts it, also after a reboot
   ollama:
     image: ollama/ollama:latest
     volumes: [ollama:/root/.ollama]       # downloaded models (a named volume, so it stays out of the project folder)
     # No ports: only the api container talks to it. To reach it from this machine, add ports: ["127.0.0.1:11434:11434"].
-    restart: unless-stopped
+    restart: "no"                 # only the Control Center starts it, also after a reboot
   db:
     image: pgvector/pgvector:pg16
     environment:
@@ -49,7 +52,7 @@ services:
       start_interval: 2s                 # but every 2 s while starting, so the api is not held back
       timeout: 5s
       retries: 5
-    restart: unless-stopped
+    restart: "no"                 # only the Control Center starts it, also after a reboot
 secrets:
   app_secrets:
     file: ./secrets.local.yaml

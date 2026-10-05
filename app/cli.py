@@ -1,6 +1,6 @@
 """Small admin commands.
 
-  python -m app.cli service on|off|status          local only: turn the service on or off (asks for the switch password)
+  python -m app.cli service status                  is the service on? (turning it on or off is the Control Center's job)
   python -m app.cli set-switch-password
   python -m app.cli ai-costs [--days N]              AI usage and its cost per model as JSON (this month, or the last N days)
   python -m app.cli create-demo-users [--reset]
@@ -77,7 +77,7 @@ def main(argv: list[str], services=None) -> int:
             # The pages no longer have an on/off button: on AWS the Control Center turns projects on and off,
             # locally this command does, with the same password and lockout as before.
             if cfg.service_switch.mode != "local":
-                raise ValueError("On AWS, turn the service on or off from the Control Center")
+                raise ValueError("Turn the service on or off from the Control Center")
             sw = ServiceSwitch.from_config(cfg, store)
             if rest == ["status"]:
                 print("The service is " + ("on" if sw.is_on() else "off") + ".")

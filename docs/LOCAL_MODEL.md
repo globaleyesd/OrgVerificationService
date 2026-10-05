@@ -20,9 +20,9 @@ soon as they are added.
   - Windows: `COMPOSE_FILE=docker-compose.yml;docker-compose.gpu.yml`
   - Mac/Linux: `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`
   - Without it the model runs on the CPU: it works, but each answer takes much longer
-- `docker compose up -d --build`
+- **Turn on** in the Control Center (http://localhost:8700)
 - Download the model (about 2.5 GB, kept in the `ollama` Docker volume):
-  - `docker compose exec ollama ollama pull qwen3:4b`
+  - `python scripts/containers.py exec ollama ollama pull qwen3:4b`
 - Restart the app so it picks up the setting: `docker compose restart api`
 
 ## Choosing a model
@@ -43,13 +43,13 @@ All four refused both questions the document does not answer.
 - The app always sends `think: false`, so reasoning models like Qwen3 answer directly instead of spending a
   minute or more thinking first
 - To compare models on your own documents: write questions in `data/eval_questions.json` and run
-  `docker compose exec -T api python - --model MODEL < scripts/eval_answers.py` (see the script's header)
+  `python scripts/containers.py exec -T api python - --model MODEL < scripts/eval_answers.py` (see the script's header)
 - To switch: pull the new model, set `llm.model_answer`, add it with `[0, 0]` under
   `costs.llm_prices_per_mtok` in `config.yaml`, then `docker compose restart api`
 
 ## Check it
-- `docker compose exec ollama ollama list` shows the downloaded models
-- `docker compose exec ollama ollama ps` shows whether the model is loaded and on the GPU or CPU
+- `python scripts/containers.py exec ollama ollama list` shows the downloaded models
+- `python scripts/containers.py exec ollama ollama ps` shows whether the model is loaded and on the GPU or CPU
 - Ask a question on `/ask`; the first one loads the model and takes a little longer
 
 ## Limits

@@ -9,7 +9,6 @@
     { "label": "Deploy: upload non-secret config", "type": "shell", "command": "python deploy/deploy.py config", "problemMatcher": [] },
     { "label": "Deploy: update server", "type": "shell", "command": "python deploy/deploy.py update", "problemMatcher": [] },
     { "label": "Deploy: show site address and names", "type": "shell", "command": "python deploy/deploy.py outputs", "problemMatcher": [] },
-    { "label": "Local: run tests", "type": "shell", "command": "python -m unittest discover -s tests -t .", "problemMatcher": [] },
-    { "label": "Local: start with Docker", "type": "shell", "command": "docker compose up --build", "problemMatcher": [] }
+    { "label": "Local: run tests", "type": "shell", "command": "python -m unittest discover -s tests -t .", "problemMatcher": [] }
   ]
 }
