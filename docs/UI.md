@@ -92,7 +92,7 @@ All data routes are under `/api`.
 | Route | Purpose |
 |---|---|
 | `GET /api/service/status` | `{on, auto_off_minutes, allow_mock, branding: {app_name, theme}}`. Always reachable |
-| `GET /control/status`, `POST /control/on` / `off` | **AWS only.** The switch function: reports the server state and, with the password, starts or stops the server. Always reachable, even when the server is stopped. POSTs must carry `x-amz-content-sha256` (the SHA-256 of the body) |
+| `GET /control/status` | **AWS only.** The status function: reports the server state. Always reachable, even when the server is stopped or at zero. It can't turn anything on or off: only the Control Center can |
 | `POST /api/service/on` / `off` | `{password}`. `401` wrong password, `429` locked out, `503` credential store unavailable. Always reachable |
 | `POST /api/auth/login` | `{username, password}` gives `{user}` and sets the cookie. `401` wrong username or password, `429` locked, `503` store unavailable |
 | `POST /api/auth/demo-login` | `{username}` gives `{user}` and sets the cookie, **no password**. Only while `ui.demo_mode` is true and only for the two demo accounts: otherwise `403`. `404` if the demo accounts haven't been created |

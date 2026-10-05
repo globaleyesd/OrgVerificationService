@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 PRIVATE_NAME = re.compile("d" + "oh|d" + "oves", re.I)     # built in pieces so this file doesn't match itself
 SKIP_DIRS = {"creds", "data", "__pycache__", ".git", ".pytest_cache"}
-SKIP_FILES = {"config.local.yaml", "params.local.json"}     # git-ignored private files
+SKIP_FILES = {"config.local.yaml", "config.aws.local.yaml", "params.local.json", "ACCESS.local.md"}     # git-ignored private files
 
 
 def repo_files():
@@ -197,6 +197,15 @@ class ControlFunctionTemplateTests(TemplateSecurityTests):
         self.assertEqual(inline.strip(), (ROOT / "deploy" / "lambda" / "control.py").read_text().strip())
         self.assertLess(len(inline.encode()), 4096)
 
+    def test_it_can_not_start_or_stop_anything(self):
+        # The Control Center, after its password, is the only way to turn the project on or off.
+        actions = set()
+        for pol in self.res["ControlRole"]["Properties"]["Policies"]:
+            for st in pol["PolicyDocument"]["Statement"]:
+                actions |= set(st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
+        self.assertEqual(actions, {"logs:CreateLogStream", "logs:PutLogEvents", "ec2:DescribeInstances"})
+        self.assertNotIn("CREDS_BUCKET", self.res["ControlFunction"]["Properties"]["Environment"]["Variables"])
+
     def test_function_is_reachable_only_through_signed_cloudfront_requests(self):
         self.assertEqual(self.res["ControlUrl"]["Properties"]["AuthType"], "AWS_IAM")
         oac = self.res["ControlOriginAccessControl"]["Properties"]["OriginAccessControlConfig"]
@@ -225,14 +234,7 @@ class ControlFunctionTemplateTests(TemplateSecurityTests):
 
     def test_control_role_is_least_privilege(self):
         stmts = self.res["ControlRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
-        by = {x["Sid"]: x for x in stmts if "Sid" in x}
-        self.assertEqual(sorted(by["StartStopThisServerOnly"]["Action"]), ["ec2:StartInstances", "ec2:StopInstances"])
-        self.assertIn("instance/", by["StartStopThisServerOnly"]["Resource"]["!Sub"])
-        self.assertEqual(by["StartStopThisServerOnly"]["Condition"], {"StringEquals": {"aws:ResourceTag/Project": {"!Ref": "ProjectName"}}})
-        self.assertEqual(by["WriteLockoutRecordOnly"]["Action"], "s3:PutObject")
-        self.assertTrue(by["WriteLockoutRecordOnly"]["Resource"]["!Sub"].endswith("/switch_lockout.json"))
-        reads = by["ReadSwitchRecords"]["Resource"]
-        self.assertEqual([r["!Sub"].rsplit("/", 1)[1] for r in reads], ["service_switch.json", "switch_lockout.json"])
+        self.assertEqual({x["Sid"] for x in stmts}, {"Logs", "ReadServerState"})
         wild = [x["Sid"] for x in stmts if x.get("Resource") == "*"]
         self.assertEqual(wild, ["ReadServerState"])                      # describe is the only thing that cannot be narrowed
 

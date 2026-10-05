@@ -137,11 +137,6 @@ class CommandTests(unittest.TestCase):
         c.llm.provider = "bedrock"
         self.assertEqual(d.stack_parameters(c, extra)["AllowBedrock"], "true")
 
-    def test_lockout_settings_reach_the_control_function(self):
-        c = Config(); c.service_switch.max_failed_attempts = 3; c.service_switch.lockout_minutes = 20
-        p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})
-        self.assertEqual((p["SwitchMaxFailedAttempts"], p["SwitchLockoutMinutes"]), ("3", "20"))
-
     def test_schedule_and_cost_settings_flow_into_the_stack(self):
         c = Config(); c.deployment.schedule.enabled = True; c.deployment.instance_type = "t4g.micro"
         p = d.stack_parameters(c, {"AmiId": "ami-1", "CloudFrontPrefixListId": "pl-1", "OriginVerifySecret": "s" * 43})

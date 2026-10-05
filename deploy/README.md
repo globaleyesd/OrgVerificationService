@@ -6,7 +6,7 @@
 ```
 Browser ──https──> CloudFront ──/ (page)──────> private S3 bucket (page files)
                        │
-                       ├──/control/*──signed──> tiny switch function: status for the page; answers /api while at zero
+                       ├──/control/*──signed──> tiny status function: state for the page; answers /api while at zero
                        │
                        └──/api/*──http:80────> one small ARM server (Docker: API + database)
                                                   ├─ pulls its image from ECR
@@ -95,7 +95,7 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 - **Going to zero:** the adapter runs `/opt/app/backup.sh` on the server (a stopped server is started for it), which dumps
   the database to `s3://<documents bucket>/backups/` (a dated copy and `db-latest.sql.gz`). Only if that succeeds does it
   set the stack parameter `Power=zero`, which deletes the server, its disk, its Elastic IP and the working-hours schedules.
-  `/api/*` is then routed to the switch function, which answers `503 Service offline`, and the page says the project is at zero.
+  `/api/*` is then routed to the status function, which answers `503 Service offline`, and the page says the project is at zero.
 - **Coming back:** `Power=on` recreates them. On its first start the new server restores `db-latest.sql.gz` **before** the
   app starts, so the app never creates empty tables first. Documents, accounts (credentials bucket), the page and the image
   were never deleted.
@@ -103,8 +103,9 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
   `python deploy/cc.py register --stack kb-verifier --project-region <region> --name "Knowledge Verifier" --costs running=18,stopped=6,zero=0.2`
   (run in the control-center project).
 - `Power` is set only by the adapter. Normal deploys keep its current value, so deploying while at zero stays at zero.
-- The old password switch at `/control/on|off` still exists (same password and lockout as before) for scripts; `/control/status`
-  tells the page the state. Locally, `python -m app.cli service on|off` replaces the button.
+- **The Control Center is the only way to turn the project on or off on AWS.** Nothing in this stack can start the server
+  by itself: `/control/status` only tells the page the state, the app's own switch is off on AWS, and the power function
+  can be invoked only by the Control Center's role. Locally, `python -m app.cli service on|off` replaces the button.
 
 ## What is locked down
 - **Both buckets**: all four Block Public Access settings on, encrypted, versioned, requests over plain HTTP denied, no ACLs. The page bucket can be read only by this CloudFront distribution (origin access control). The documents bucket is kept if the stack is deleted.
@@ -112,7 +113,7 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 - **Page addresses**: a small CloudFront Function maps `/ask` and `/add` to their files (and redirects a trailing slash); a test runs the function and checks it matches the app's page list.
 - **Server**: no SSH, only CloudFront's address list can reach port 80 and the app refuses any request without this distribution's secret `X-Origin-Verify` header (so another CloudFront distribution pointed at the server gets nothing; the value is generated once into `deploy/params.local.json` and is never printed), IMDSv2 required, encrypted disk, SSM Session Manager for access, least-privilege role (pull this one image, use this one bucket, optionally call Bedrock).
 - **Secrets**: none in the template, none in the user-data, none uploaded. The deploy script can upload only three non-secret files (checked by tests). The database password is generated on the server.
-- **Switch function**: signed requests only (origin access control + IAM auth, permission limited to this distribution). Its role can start/stop only this server, read two records and write one (the lockout counter). Wrong guesses lock it globally and the lockout is stored, so it survives restarts. Logs kept 14 days.
+- **Status function**: signed requests only (origin access control + IAM auth, permission limited to this distribution). Its role can only read the server's state: it can't start or stop anything and reads no records. Logs kept 14 days.
 - **Credentials bucket**: holds only salted password hashes (service switch, user accounts) and the cookie-signing key. Private, encrypted, versioned, HTTPS-only, and its bucket policy **denies everyone except the server's IAM role**, administrators included (to get in yourself, edit the policy first; that leaves a CloudTrail record). The role can read and write records but not delete. It is kept if the stack is deleted. Effectively free.
 - **API responses** are never cached.
 
@@ -129,7 +130,7 @@ The pages have no on/off button. Projects are controlled from the **Control Cent
 10. **Credentials in S3, not Secrets Manager.** Cheaper and simpler, but no automatic rotation and no per-secret audit trail unless you pay for CloudTrail data events. The cookie-signing key is a real secret (not a hash): whoever holds it can forge sign-ins. Session tokens cannot be revoked before they expire.
 11. **Demo sign-in is passwordless.** While `ui.demo_mode` is true, anyone who reaches the site with the service switch on can click Eileen and see everything. Keep the switch off when not demoing; set `ui.demo_mode: false` before real use.
 12. **Real answers are new and unproven on AWS.** The server downloads its search model (about 130 MB) the first time a document is added, so the first upload after deploy is slow and needs outbound internet. Original files go to the documents bucket through the server's role. The Postgres code has never run against a database until your first local run.
-13. **The switch function is new and unverified against real AWS.** Things to check on the first deploy: that the CloudFront origin access control for Lambda accepts the browser's `x-amz-content-sha256` header on POST; whether your account needs the extra `lambda:InvokeFunction` permission (both are in the template); and that `s3:ListBucket` on the credentials bucket is what lets a missing record read as "not found". If turning on returns 403, start there.
+13. **The status function** needs the extra `lambda:InvokeFunction` permission for CloudFront in some accounts (it is in the template).
 14. **Switch lockout counter is not atomic** (two simultaneous wrong guesses can count as one). Fine for this purpose.
 15. **A started server takes about a minute**, and `service_switch.auto_off_hours` does not apply on AWS.
 16. **No user admin screen or password reset yet**; accounts are managed with the `app.cli` commands.

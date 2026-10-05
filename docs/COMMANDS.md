@@ -107,7 +107,7 @@ Run everything from the project folder (the one containing `config.yaml`). The V
 - Emergency (needs AWS admin rights, bypasses the password):
   - Stop: `aws ec2 stop-instances --instance-ids INSTANCE_ID`
   - Start: `aws ec2 start-instances --instance-ids INSTANCE_ID`
-- Look at the switch function's logs: `aws logs tail /aws/lambda/kb-verifier-control --follow`
+- Look at the status function's logs: `aws logs tail /aws/lambda/kb-verifier-control --follow`
 
 ## Work on the AWS server
 - Open a shell (no SSH port is open; needs the AWS Session Manager plugin):

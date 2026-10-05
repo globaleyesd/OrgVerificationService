@@ -76,8 +76,6 @@ def stack_parameters(cfg: Config, extra: dict) -> dict:
         "ScheduleTimezone": s.timezone,
         "StartHour": str(s.start_hour),
         "StopHour": str(s.stop_hour),
-        "SwitchMaxFailedAttempts": str(cfg.service_switch.max_failed_attempts),
-        "SwitchLockoutMinutes": str(max(1, round(cfg.service_switch.lockout_minutes))),
     }
     for key in ("AmiId", "CloudFrontPrefixListId", "BudgetEmail", "ImageTag", "OriginVerifySecret"):
         if extra.get(key):

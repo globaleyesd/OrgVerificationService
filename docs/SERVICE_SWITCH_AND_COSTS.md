@@ -42,9 +42,8 @@ Only four paths: `/api/health` (container health check), `/api/service/status` (
 
 ### How the AWS switch works
 - CloudFront routes `/control/*` to a small Lambda function (source: `deploy/lambda/control.py`, tested, and copied inline into the template by a test-checked rule). It is reachable **only** through CloudFront, which signs the request; its raw address cannot be called directly.
-- `GET /control/status` tells the page whether the server is stopped, starting, running or stopping. It needs no password.
-- `POST /control/on` and `/control/off` take `{password}`. The function checks it against the **same password record** the app uses (`service_switch` in the credentials bucket), then starts or stops this one server. The browser sends the SHA-256 of the body in a header because CloudFront needs it to sign a POST.
-- Wrong guesses are counted in the credentials bucket (`switch_lockout`), so the lockout survives restarts of the function. After `max_failed_attempts` it locks for `lockout_minutes`, and even the right password is refused meanwhile.
+- `GET /control/status` tells the page whether the server is stopped, starting, running or stopping (or at zero). It needs no password.
+- It can't start or stop anything. On AWS the **Control Center**, after its password, is the only way to turn the project on, pause it or take it to zero.
 - While the server is stopped, requests to `/api/*` get CloudFront's 502/504, which the template turns into the same `503 {"detail": "Service offline", "offline": true}` the app uses, so the page and any direct caller get a clear message.
 - The offline screen still appears, because the page comes from S3 and `/control/status` is always up. Branding is remembered in the browser, so the offline screen carries the app's name after the first visit.
 

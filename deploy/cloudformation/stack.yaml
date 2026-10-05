@@ -71,16 +71,6 @@ Parameters:
     Default: 18
     MinValue: 0
     MaxValue: 23
-  SwitchMaxFailedAttempts:
-    Type: Number
-    Default: 5
-    MinValue: 1
-    Description: Wrong switch passwords before the control function locks (matches service_switch.max_failed_attempts).
-  SwitchLockoutMinutes:
-    Type: Number
-    Default: 10
-    MinValue: 1
-    Description: Lockout length in minutes (matches service_switch.lockout_minutes).
   Power:
     Type: String
     Default: 'on'
@@ -525,9 +515,10 @@ Resources:
       AllocationId: !GetAtt ServerIp.AllocationId
       InstanceId: !Ref Server
 
-  # ------------------------------------------------------------------ the switch: the ONLY door that turns the server on or off
-  # A tiny function that checks the switch password and then starts or stops the server, so "off" really stops the
-  # compute charge. It is reachable only through CloudFront (/control/*), which signs its requests (origin access control).
+  # ------------------------------------------------------------------ status: what the page asks while the app may be down
+  # A tiny function that reports the server's state and answers /api/* while the project is at zero. It can't start or
+  # stop anything: the Control Center (after its password) is the only way to turn the project on or off. Reachable only
+  # through CloudFront (/control/*), which signs its requests (origin access control).
   # COST: a few invocations a day stay inside the Lambda free tier; logs are kept 14 days. The source is deploy/lambda/control.py
   # and a test keeps this inline copy identical to it.
   ControlLogGroup:
@@ -543,29 +534,12 @@ Resources:
         Version: '2012-10-17'
         Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
       Policies:
-        - PolicyName: switch-only
+        - PolicyName: status-only
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - {Sid: Logs, Effect: Allow, Action: ['logs:CreateLogStream', 'logs:PutLogEvents'], Resource: !GetAtt ControlLogGroup.Arn}
-              - Sid: StartStopThisServerOnly       # by tag: the server is removed and recreated when the project goes to zero and back
-                Effect: Allow
-                Action: ['ec2:StartInstances', 'ec2:StopInstances']
-                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
-                Condition: {StringEquals: {'aws:ResourceTag/Project': !Ref ProjectName}}
               - {Sid: ReadServerState, Effect: Allow, Action: 'ec2:DescribeInstances', Resource: '*'}   # describe cannot be limited to one resource
-              - Sid: ListForMissingKeyAnswers          # lets "record not found" be told apart from "access denied"
-                Effect: Allow
-                Action: 's3:ListBucket'
-                Resource: !GetAtt CredsBucket.Arn
-              - Sid: ReadSwitchRecords
-                Effect: Allow
-                Action: 's3:GetObject'
-                Resource: [!Sub '${CredsBucket.Arn}/service_switch.json', !Sub '${CredsBucket.Arn}/switch_lockout.json']
-              - Sid: WriteLockoutRecordOnly
-                Effect: Allow
-                Action: 's3:PutObject'
-                Resource: !Sub '${CredsBucket.Arn}/switch_lockout.json'
   ControlFunction:
     Type: AWS::Lambda::Function
     DependsOn: ControlLogGroup
@@ -575,46 +549,27 @@ Resources:
       Architectures: [arm64]                  # COST - cheaper per millisecond
       Handler: index.handler
       Role: !GetAtt ControlRole.Arn
-      Timeout: 15
-      MemorySize: 512                         # scrypt needs the CPU share that comes with this size
+      Timeout: 10
+      MemorySize: 128                         # COST - the smallest size: it only reads the server's state
       Environment:
         Variables:
-          CREDS_BUCKET: !Ref CredsBucket
           PROJECT: !Ref ProjectName
-          MAX_FAILS: !Ref SwitchMaxFailedAttempts
-          LOCK_MIN: !Ref SwitchLockoutMinutes
       Code:
         ZipFile: |
-          """AWS-only service switch. Password-checks, then starts or stops the server. Also answers /api/* while the project
-          is at zero (no server). Inline in the template (keep under 4096 bytes). Same password record as app/passwords.py."""
-          import base64, hashlib, hmac, json, os, time
+          """AWS-only status function behind CloudFront. It reports the server's state to the page and answers /api/* while the
+          project is at zero (no server). It can NOT start or stop anything: the only way to turn the project on or off is the
+          Control Center, after its password. Inline in the template (keep under 4096 bytes)."""
+          import json, os
           import boto3
-          B, P = os.environ["CREDS_BUCKET"], os.environ["PROJECT"]
-          MAXF, LOCK = int(os.environ.get("MAX_FAILS", 5)), float(os.environ.get("LOCK_MIN", 10)) * 60
-          s3, ec2 = boto3.client("s3"), boto3.client("ec2")
+          P = os.environ["PROJECT"]
+          ec2 = boto3.client("ec2")
 
-          def get(k):
-              try:
-                  return json.loads(s3.get_object(Bucket=B, Key=k + ".json")["Body"].read())
-              except s3.exceptions.NoSuchKey:
-                  return None
-
-          def put(k, d):
-              s3.put_object(Bucket=B, Key=k + ".json", Body=json.dumps(d).encode(), ServerSideEncryption="AES256")
-
-          def good(pw, r):
-              try:
-                  h = hashlib.scrypt(pw.encode(), salt=base64.b64decode(r["salt"]), n=r["n"], r=r["r"], p=r["p"], dklen=r["dklen"])
-                  return hmac.compare_digest(h, base64.b64decode(r["hash"]))
-              except Exception:
-                  return False
-
-          def server():
+          def server_state():
               f = [{"Name": "tag:Project", "Values": [P]}, {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}]
               for r in ec2.describe_instances(Filters=f)["Reservations"]:
                   for i in r["Instances"]:
-                      return i["InstanceId"], i["State"]["Name"]
-              return None, "zero"
+                      return i["State"]["Name"]
+              return "zero"
 
           def out(code, body):
               return {"statusCode": code, "headers": {"content-type": "application/json", "cache-control": "no-store"}, "body": json.dumps(body)}
@@ -623,46 +578,15 @@ Resources:
               raw_path, method = event.get("rawPath", ""), event["requestContext"]["http"]["method"]
               if raw_path.startswith("/api/"):   # routed here only while the project is at zero
                   return out(503, {"detail": "Service offline", "offline": True})
-              path = raw_path.rstrip("/").rsplit("/", 1)[-1]
+              if method != "GET" or raw_path.rstrip("/").rsplit("/", 1)[-1] != "status":
+                  return out(404, {"detail": "Not found. Turn the project on or off from the Control Center."})
               try:
-                  if method == "GET" and path == "status":
-                      st = server()[1]
-                      return out(200, {"state": st, "on": st in ("pending", "running")})
-                  if method != "POST" or path not in ("on", "off"):
-                      return out(404, {"detail": "Not found"})
-                  raw = event.get("body") or "{}"
-                  pw = json.loads(base64.b64decode(raw) if event.get("isBase64Encoded") else raw).get("password")
-                  now, lk, rec = time.time(), get("switch_lockout") or {}, get("service_switch")
-                  if now < lk.get("until", 0):
-                      return out(429, {"detail": "Too many attempts. Try again in %d minute(s)." % -(-(lk["until"] - now) // 60)})
-                  if rec is None:
-                      return out(503, {"detail": "The switch password is not set up yet"})
-                  if not isinstance(pw, str) or not good(pw, rec):
-                      n = lk.get("n", 0) + 1
-                      locked = n >= MAXF
-                      put("switch_lockout", {"n": 0, "until": now + LOCK} if locked else {"n": n, "until": 0})
-                      return out(429 if locked else 401, {"detail": "Too many attempts. Try again later." if locked else "Wrong password"})
-                  if lk.get("n"):
-                      put("switch_lockout", {"n": 0, "until": 0})
-                  i, st = server()
-                  if st == "zero":
-                      return out(409, {"detail": "This project is at zero. Bring it back from the Control Center."})
-                  if path == "on":
-                      if st == "stopping":
-                          return out(409, {"detail": "The server is still shutting down. Try again in a minute."})
-                      if st == "stopped":
-                          ec2.start_instances(InstanceIds=[i])
-                          st = "pending"
-                  else:
-                      if st == "pending":
-                          return out(409, {"detail": "The server is still starting. Try again in a minute."})
-                      if st == "running":
-                          ec2.stop_instances(InstanceIds=[i])
-                          st = "stopping"
+                  st = server_state()
                   return out(200, {"state": st, "on": st in ("pending", "running")})
               except Exception as e:
-                  print("control error", type(e).__name__)
-                  return out(503, {"detail": "Control is unavailable right now"})
+                  print("status error", type(e).__name__)
+                  return out(503, {"detail": "Status is unavailable right now"})
+
   ControlUrl:
     Type: AWS::Lambda::Url
     Properties:
